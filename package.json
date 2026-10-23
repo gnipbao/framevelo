@@ -1,6 +1,6 @@
 {
   "name": "framevelo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A rendering accelerator for code-driven videos.",
   "keywords": [
     "video",

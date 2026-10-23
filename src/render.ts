@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import type { Browser } from "puppeteer-core";
 import { captureToFile, openCapturePage, preparePage, type CapturePage, type CapturePolicy, type CaptureResult } from "./capture.ts";
@@ -47,6 +49,11 @@ export interface RenderOptions {
   subframes?: number;
   shutter?: number;
   background?: string;
+  /**
+   * Extra directories to serve, keyed by URL prefix ("/@skill/" → a skill directory). A page that
+   * imports from /@skill/ gets the code-video skill mounted automatically when it can be found.
+   */
+  mounts?: Record<string, string>;
   /**
    * Plain pages: replace <video data-start> sources that are not all-intra with cached all-intra
    * proxies so every seek decodes one frame (default true).
@@ -130,6 +137,28 @@ export function videoWindows(videos: unknown[]): Array<[number, number]> | null 
     windows.push([start, end]);
   }
   return windows;
+}
+
+/** code-video compositions import their runtime from /@skill/. */
+export function isCodeVideoHtml(html: string): boolean {
+  return /["'(]\/@skill\//.test(html) || /\bdefineComposition\s*\(/.test(html);
+}
+
+/** The code-video skill directory: CODE_VIDEO_SKILL_DIR, else ~/.claude/skills/code-video. */
+export function findCodeVideoSkill(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string | null {
+  const candidates = [env.CODE_VIDEO_SKILL_DIR, path.join(home, ".claude", "skills", "code-video")];
+  return candidates.find((dir): dir is string => Boolean(dir) && existsSync(path.join(dir!, "runtime", "comp.js"))) ?? null;
+}
+
+/** A served URL back to the file it came from (the root or a mount), or null. */
+export function localFileForUrl(url: string, origin: string, root: string, mounts: Record<string, string> = {}): string | null {
+  if (!url.startsWith(`${origin}/`)) return null;
+  const pathname = decodeURIComponent(new URL(url).pathname);
+  for (const [prefix, dir] of Object.entries(mounts)) {
+    const normalized = prefix.endsWith("/") ? prefix : `${prefix}/`;
+    if (pathname.startsWith(normalized)) return resolveInsideRoot(path.resolve(dir), `/${pathname.slice(normalized.length)}`);
+  }
+  return resolveInsideRoot(root, pathname);
 }
 
 const PROXY_URL_PREFIX = "/__framevelo/proxies/";
@@ -218,8 +247,20 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       // The compiled entry is always index.html; a non-index input file is compiled as the project root.
       if (path.basename(file) !== "index.html") warnings.push(`compiled ${root} as a HyperFrames project (entry index.html)`);
     } else {
-      server = await serveDirectory(root, { mounts: { [PROXY_URL_PREFIX]: proxyCacheDir() } });
-      url = `${server.origin}/${path.relative(root, file).split(path.sep).map(encodeURIComponent).join("/")}`;
+      const mounts: Record<string, string> = { ...options.mounts, [PROXY_URL_PREFIX]: proxyCacheDir() };
+      const codeVideo = isCodeVideoHtml(html);
+      if (codeVideo && !Object.keys(mounts).some((prefix) => prefix.replace(/\/?$/, "/") === "/@skill/")) {
+        const skill = findCodeVideoSkill();
+        if (skill) {
+          mounts["/@skill/"] = skill;
+          log(`code-video composition: serving ${skill} at /@skill/`);
+        } else {
+          warnings.push("the page imports /@skill/ but no code-video skill was found; set CODE_VIDEO_SKILL_DIR or pass --mount /@skill/=<dir>");
+        }
+      }
+      server = await serveDirectory(root, { mounts });
+      // code-video compositions render without their preview controls in render mode.
+      url = `${server.origin}/${path.relative(root, file).split(path.sep).map(encodeURIComponent).join("/")}${codeVideo ? "?render=1" : ""}`;
     }
 
     compileMs = performance.now() - c0;
@@ -227,7 +268,8 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     browser = await browserLaunch;
     const version = await browser.version();
     log(`chrome ${version} (${chromePath})`);
-    const capture: CapturePage = await openCapturePage(browser, url, viewport);
+    // Plain pages get a seeded Math.random so renders repeat; HyperFrames keeps the official behavior.
+    const capture: CapturePage = await openCapturePage(browser, url, viewport, { seedRandom: !useHyperFrames });
     const prepared: PagePrepareResult = await preparePage(capture, {
       mode: useHyperFrames ? "dom" : (options.mode ?? "auto"),
       ...(options.selector ? { selector: options.selector } : {}),
@@ -278,7 +320,13 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       }
     }
 
-    const audioPath = options.audio ? path.resolve(options.audio) : (site?.audioPath ?? undefined);
+    let declaredAudio: string | undefined;
+    if (!options.audio && !site && prepared.audio && server) {
+      declaredAudio = localFileForUrl(prepared.audio, server.origin, root, options.mounts) ?? undefined;
+      if (declaredAudio) log(`audio: ${path.relative(root, declaredAudio) || declaredAudio} (declared by the composition)`);
+      else warnings.push(`the composition declares audio ${prepared.audio}, which is not a local file`);
+    }
+    const audioPath = options.audio ? path.resolve(options.audio) : (site?.audioPath ?? declaredAudio);
     const result = await captureToFile({
       page: capture.page,
       prepared,

@@ -28,12 +28,17 @@ export interface CapturePage {
  * Open `url` in a fresh tab ready for capture: the bootstrap runs before any page script, and the
  * FrameVelo runtime is installed once the page has loaded.
  */
-export async function openCapturePage(browser: Browser, url: string, viewport: { width: number; height: number }): Promise<CapturePage> {
+export async function openCapturePage(
+  browser: Browser,
+  url: string,
+  viewport: { width: number; height: number },
+  options: { seedRandom?: boolean } = {},
+): Promise<CapturePage> {
   const page = await browser.newPage();
   await page.setViewport({ width: viewport.width, height: viewport.height, deviceScaleFactor: 1 });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error instanceof Error ? error.message : String(error)));
-  await page.evaluateOnNewDocument(pageBootstrap);
+  await page.evaluateOnNewDocument(pageBootstrap, { seedRandom: options.seedRandom ?? false });
   await page.goto(url, { waitUntil: "load" });
   await page.evaluate(pageInstallRuntime);
   return { page, errors };

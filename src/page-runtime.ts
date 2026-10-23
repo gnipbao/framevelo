@@ -3,7 +3,7 @@
 // erasable TypeScript syntax.
 
 export type CaptureMode = "auto" | "canvas" | "dom";
-export type TimeDriver = "framevelo" | "hyperframes" | "seek" | "gsap";
+export type TimeDriver = "framevelo" | "hyperframes" | "code-video" | "seek" | "gsap";
 
 export interface PagePrepareOptions {
   mode: CaptureMode;
@@ -24,6 +24,8 @@ export interface PagePrepareResult {
   canvasHeight?: number;
   duration?: number;
   fps?: number;
+  /** Soundtrack URL the composition declares (code-video `defineComposition({ audio })`). */
+  audio?: string;
   chromeHasDrawElement: boolean;
   /** DOM mode only: whether drawElementImage capture is set up (otherwise only screenshots work). */
   drawElementReady: boolean;
@@ -127,7 +129,7 @@ export interface FrameVeloPageApi {
  * compositor by texture swap, so drawElementImage would see a stale first frame and they must be
  * composited by hand. WebGL contexts get `preserveDrawingBuffer` so they can be read back.
  */
-export function pageBootstrap(): void {
+export function pageBootstrap(options: { seedRandom?: boolean } = {}): void {
   type W = Window & {
     __fvClock?: { now: () => number; setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout };
     __fvAccelCanvases?: HTMLCanvasElement[];
@@ -140,6 +142,17 @@ export function pageBootstrap(): void {
     setTimeout: window.setTimeout.bind(window) as typeof setTimeout,
     clearTimeout: window.clearTimeout.bind(window),
   };
+  if (options.seedRandom) {
+    // Deterministic Math.random (Mulberry32, the seed code-video's renderer uses): renders repeat.
+    let a = 0x9e3779b9;
+    Math.random = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
   // HyperFrames compositions assign into a registry its runtime normally creates first.
   w.__timelines ??= {};
   const accelerated: HTMLCanvasElement[] = [];
@@ -176,6 +189,8 @@ export function pageInstallRuntime(): void {
     __seek?: Seek;
     __duration?: number;
     __timelines?: Record<string, Timeline | undefined>;
+    __comp?: { duration?: number; fps?: number; ready?: boolean; error?: unknown; audio?: string | null };
+    seek?: Seek;
     __fvChunk(base64: string): Promise<void>;
     __fvProgress(done: number): void;
   };
@@ -302,7 +317,7 @@ export function pageInstallRuntime(): void {
     const warnings: string[] = [];
     const maxPolls = Math.max(1, Math.ceil(options.readyTimeoutMs / 50));
 
-    type Found = { driver: TimeDriver; seek: (t: number, quiet: boolean) => Promise<void>; duration?: number; fps?: number };
+    type Found = { driver: TimeDriver; seek: (t: number, quiet: boolean) => Promise<void>; duration?: number; fps?: number; audio?: string };
     const findDriver = (): Found | null => {
       const fv = w.__framevelo;
       if (fv && typeof fv.seek === "function") {
@@ -323,6 +338,20 @@ export function pageInstallRuntime(): void {
         };
       }
       if (options.expectHyperFrames) return null;
+      // code-video: defineComposition() exposes window.seek(t) and window.__comp once setup ran.
+      const comp = w.__comp;
+      if (comp && typeof w.seek === "function") {
+        if (comp.error) throw new Error(`The composition failed to set up: ${String(comp.error)}`);
+        if (!comp.ready) return null;
+        const seek = w.seek;
+        return {
+          driver: "code-video",
+          seek: (t) => settle(seek(t)),
+          ...(comp.duration ? { duration: comp.duration } : {}),
+          ...(comp.fps ? { fps: comp.fps } : {}),
+          ...(comp.audio ? { audio: new URL(comp.audio, location.href).href } : {}),
+        };
+      }
       if (typeof w.__seek === "function") {
         const seek = w.__seek;
         return { driver: "seek", seek: (t) => settle(seek(t)), duration: w.__duration };
@@ -512,6 +541,7 @@ export function pageInstallRuntime(): void {
       ...(target instanceof HTMLCanvasElement ? { canvasWidth: target.width, canvasHeight: target.height } : {}),
       ...(duration !== undefined ? { duration } : {}),
       ...(fps !== undefined ? { fps } : {}),
+      ...(found.audio ? { audio: found.audio } : {}),
       chromeHasDrawElement,
       acceleratedCanvases: accelerated.length,
       warnings,

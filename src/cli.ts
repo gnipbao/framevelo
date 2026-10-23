@@ -50,6 +50,8 @@ Render options:
       --background <css>  Color behind transparent DOM content (default: page background)
       --no-hyperframes    Render a HyperFrames project as a plain page instead of compiling it
                           with the official HyperFrames pipeline (@hyperframes/producer)
+      --mount <p>=<dir>   Serve another directory under a URL prefix (repeatable), e.g.
+                          --mount /@skill/=~/.claude/skills/code-video
       --chrome <path>     Chrome binary (default: FRAMEVELO_CHROME, newest chrome-headless-shell 151+
                           in the FrameVelo/HyperFrames/Puppeteer caches, then installed Chrome)
       --json              Print the result as JSON
@@ -108,6 +110,7 @@ async function renderCommand(argv: string[]): Promise<void> {
       shutter: { type: "string" },
       background: { type: "string" },
       chrome: { type: "string" },
+      mount: { type: "string", multiple: true },
       "no-hyperframes": { type: "boolean" },
       json: { type: "boolean" },
       quiet: { type: "boolean", short: "q" },
@@ -165,6 +168,16 @@ async function renderCommand(argv: string[]): Promise<void> {
   assign("background", values.background);
   assign("chromePath", values.chrome);
   if (values["no-hyperframes"]) options.hyperframes = "off";
+  if (values.mount?.length) {
+    const mounts: Record<string, string> = {};
+    for (const spec of values.mount) {
+      const eq = spec.indexOf("=");
+      if (eq <= 0) throw new Error(`Invalid --mount "${spec}"; use PREFIX=DIR such as /@skill/=./skill.`);
+      const dir = spec.slice(eq + 1).replace(/^~(?=$|\/)/, process.env.HOME ?? "~");
+      mounts[spec.slice(0, eq)] = path.resolve(dir);
+    }
+    options.mounts = mounts;
+  }
 
   const result = await render(options);
   if (values.json) {

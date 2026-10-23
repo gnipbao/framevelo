@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fpsFromHtml, resolveInput, videoWindows, viewportFromHtml } from "../src/render.ts";
+import { findCodeVideoSkill, fpsFromHtml, isCodeVideoHtml, localFileForUrl, resolveInput, videoWindows, viewportFromHtml } from "../src/render.ts";
 
 test("viewportFromHtml prefers the HyperFrames root size", () => {
   const html = `<meta name="viewport" content="width=800, height=600" />
@@ -42,4 +42,30 @@ test("videoWindows returns start/end pairs, or null when any is unknown", () => 
   assert.deepEqual(videoWindows([]), []);
   assert.equal(videoWindows([{ start: 1 }]), null);
   assert.equal(videoWindows([{ start: 1, end: Infinity }]), null);
+});
+
+test("isCodeVideoHtml recognizes compositions that import the code-video runtime", () => {
+  assert.equal(isCodeVideoHtml(`<script type="importmap">{"imports":{"three":"/@skill/node_modules/three/build/three.module.js"}}</script>`), true);
+  assert.equal(isCodeVideoHtml(`<script type="module">import { defineComposition } from '/@skill/runtime/comp.js';</script>`), true);
+  assert.equal(isCodeVideoHtml(`<div id="root" data-composition-id="main"></div>`), false);
+});
+
+test("findCodeVideoSkill prefers CODE_VIDEO_SKILL_DIR and requires the runtime", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "framevelo-skill-"));
+  try {
+    assert.equal(findCodeVideoSkill({ CODE_VIDEO_SKILL_DIR: dir }, "/nonexistent"), null, "a directory without runtime/comp.js is not a skill");
+    await mkdir(path.join(dir, "runtime"));
+    await writeFile(path.join(dir, "runtime", "comp.js"), "");
+    assert.equal(findCodeVideoSkill({ CODE_VIDEO_SKILL_DIR: dir }, "/nonexistent"), dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("localFileForUrl maps served URLs back to files in the root or a mount", () => {
+  const origin = "http://127.0.0.1:5000";
+  assert.equal(localFileForUrl(`${origin}/audio/song%20one.wav`, origin, "/proj"), path.join("/proj", "audio", "song one.wav"));
+  assert.equal(localFileForUrl(`${origin}/@skill/runtime/comp.js`, origin, "/proj", { "/@skill/": "/skill" }), path.join("/skill", "runtime", "comp.js"));
+  assert.equal(localFileForUrl("https://cdn.example.com/a.wav", origin, "/proj"), null);
+  assert.equal(localFileForUrl(`${origin}/../etc/passwd`, origin, "/proj"), path.join("/proj", "etc", "passwd"), "never escapes the root");
 });
