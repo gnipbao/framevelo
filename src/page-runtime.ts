@@ -25,6 +25,8 @@ export interface PagePrepareResult {
   duration?: number;
   fps?: number;
   chromeHasDrawElement: boolean;
+  /** DOM mode only: whether drawElementImage capture is set up (otherwise only screenshots work). */
+  drawElementReady: boolean;
   /** WebGL/WebGPU canvases composited under the DOM paint (DOM mode). */
   acceleratedCanvases: number;
   warnings: string[];
@@ -63,10 +65,27 @@ export interface FrameVeloPageApi {
   seek(t: number): Promise<void>;
   /** Paint the current state as sub-frame `k`; with `encodeFrame`, also encode the finished frame. */
   sample(k: number, encodeFrame?: number): Promise<void>;
+  /** Use a native screenshot (base64 JPEG/PNG) as sub-frame `k`; with `encodeFrame`, also encode. */
+  sampleScreenshot(base64: string, k: number, encodeFrame?: number): Promise<void>;
   encode(frameIndex: number): Promise<void>;
   /** In-page loop: seek, sample and encode `count` frames starting at `startFrame`. */
   run(startFrame: number, count: number, subframeOffsets: number[]): Promise<void>;
   end(): Promise<PageRenderStats>;
+  /**
+   * DOM mode: "dom" keeps the captured element inside the capture canvas (drawElementImage);
+   * "screenshot" moves it back into the page so the compositor paints it for a native screenshot.
+   */
+  setRoute(route: "dom" | "screenshot"): void;
+  /** Viewport rectangle of the captured element, for a screenshot clip. */
+  targetRect(): { x: number; y: number; width: number; height: number };
+  /** Composition times (seconds) where clips start or end: natural interval boundaries. */
+  boundaries(): number[];
+  /** Paint the current state with drawElementImage without encoding (verification). */
+  paintOnly(): Promise<void>;
+  /** PSNR (dB) between the last drawElementImage paint and a native screenshot, at reduced size. */
+  compareScreenshot(base64: string): Promise<number>;
+  /** PNG data URL of the last drawElementImage paint (debugging verification). */
+  captureDataUrl(): string;
 }
 
 /**
@@ -150,6 +169,7 @@ export function pageInstallRuntime(): void {
     sentinel?: HTMLElement;
     accelerated: HTMLCanvasElement[];
     background: string;
+    route: "dom" | "screenshot";
   }
   let state: State | null = null;
 
@@ -158,6 +178,10 @@ export function pageInstallRuntime(): void {
     source: HTMLCanvasElement;
     output: OffscreenCanvas | null;
     octx: OffscreenCanvasRenderingContext2D | null;
+    /** Decoded screenshot of the current sub-frame (screenshot route). */
+    shot: OffscreenCanvas | null;
+    /** Canvas the next encode reads when no output canvas accumulates sub-frames. */
+    frameSource: HTMLCanvasElement | OffscreenCanvas;
     encoder: VideoEncoder;
     config: VideoEncoderConfig;
     hardwareFallback: boolean;
@@ -303,10 +327,10 @@ export function pageInstallRuntime(): void {
     let capture: HTMLCanvasElement | undefined;
     let sentinel: HTMLElement | undefined;
     const accelerated: HTMLCanvasElement[] = [];
-    if (mode === "dom") {
-      if (!chromeHasDrawElement) {
-        throw new Error("DOM capture needs canvas.drawElementImage (Chrome 151 or later with the CanvasDrawElement feature).");
-      }
+    if (mode === "dom" && !chromeHasDrawElement) {
+      warnings.push("this Chrome has no canvas.drawElementImage (Chrome 151+); every frame uses screenshot capture");
+    }
+    if (mode === "dom" && chromeHasDrawElement) {
       capture = document.createElement("canvas");
       capture.id = "__fv_capture";
       capture.setAttribute("layoutsubtree", "");
@@ -347,12 +371,14 @@ export function pageInstallRuntime(): void {
       ...(sentinel ? { sentinel } : {}),
       accelerated,
       background,
+      route: mode === "dom" && !capture ? "screenshot" : "dom",
     };
     return {
       driver: found.driver,
       mode,
       cssWidth,
       cssHeight,
+      drawElementReady: Boolean(capture),
       ...(target instanceof HTMLCanvasElement ? { canvasWidth: target.width, canvasHeight: target.height } : {}),
       ...(duration !== undefined ? { duration } : {}),
       ...(fps !== undefined ? { fps } : {}),
@@ -457,8 +483,13 @@ export function pageInstallRuntime(): void {
     if (!state) throw new Error("prepare() must run before begin().");
     const st = state;
     let source: HTMLCanvasElement;
-    if (st.mode === "dom") {
-      source = st.capture!;
+    if (st.mode === "dom" && st.capture) {
+      source = st.capture;
+      source.width = o.width;
+      source.height = o.height;
+    } else if (st.mode === "dom") {
+      // Screenshot-only DOM capture: frames always come from decoded screenshots.
+      source = document.createElement("canvas");
       source.width = o.width;
       source.height = o.height;
     } else {
@@ -473,6 +504,8 @@ export function pageInstallRuntime(): void {
       source,
       output,
       octx: output ? output.getContext("2d") : null,
+      shot: st.mode === "dom" ? new OffscreenCanvas(o.width, o.height) : null,
+      frameSource: output ?? source,
       hardwareFallback: false,
       encoderError: null as unknown,
       pending: [] as Uint8Array[],
@@ -532,7 +565,7 @@ export function pageInstallRuntime(): void {
     const { s } = requireSession();
     if (s.encoderError) throw s.encoderError;
     const frameDuration = 1e6 / s.o.fps;
-    const frame = new VideoFrame((s.output ?? s.source) as CanvasImageSource, {
+    const frame = new VideoFrame((s.output ?? s.frameSource) as CanvasImageSource, {
       timestamp: Math.round(frameIndex * frameDuration),
       duration: Math.round(frameDuration),
     });
@@ -554,16 +587,125 @@ export function pageInstallRuntime(): void {
     if (s.frames % 5 === 0) w.__fvProgress(s.frames);
   }
 
-  async function sample(k: number, encodeFrame?: number): Promise<void> {
-    const { s, st } = requireSession();
-    await paint(s, st);
+  function accumulate(s: Session, from: HTMLCanvasElement | OffscreenCanvas, k: number): void {
+    s.frameSource = from;
     if (s.octx) {
       // Running mean: after k+1 samples, blend the new one at 1/(k+1).
       s.octx.globalAlpha = 1 / (k + 1);
-      s.octx.drawImage(s.source, 0, 0, s.o.width, s.o.height);
+      s.octx.drawImage(from, 0, 0, s.o.width, s.o.height);
       s.octx.globalAlpha = 1;
     }
+  }
+
+  async function sample(k: number, encodeFrame?: number): Promise<void> {
+    const { s, st } = requireSession();
+    if (st.mode === "dom" && st.route !== "dom") throw new Error("sample() needs the dom route; use sampleScreenshot().");
+    await paint(s, st);
+    accumulate(s, s.source, k);
     if (encodeFrame !== undefined) await encode(encodeFrame);
+  }
+
+  async function decodeInto(base64: string, canvas: OffscreenCanvas): Promise<void> {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([bytes]));
+    try {
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    } finally {
+      bitmap.close();
+    }
+  }
+
+  async function sampleScreenshot(base64: string, k: number, encodeFrame?: number): Promise<void> {
+    const { s } = requireSession();
+    if (!s.shot) throw new Error("Screenshots are only used for DOM capture.");
+    const p0 = clock.now();
+    await decodeInto(base64, s.shot);
+    s.stats.paintMs += clock.now() - p0;
+    accumulate(s, s.shot, k);
+    if (encodeFrame !== undefined) await encode(encodeFrame);
+  }
+
+  function setRoute(route: "dom" | "screenshot"): void {
+    if (!state || state.mode !== "dom") return;
+    const st = state;
+    if (route === st.route) return;
+    if (route === "dom" && !st.capture) throw new Error("drawElementImage capture is not available in this Chrome.");
+    const capture = st.capture!;
+    if (route === "screenshot") {
+      capture.parentNode!.insertBefore(st.target, capture);
+      capture.style.display = "none";
+      for (const canvas of st.accelerated) canvas.style.visibility = "";
+    } else {
+      capture.style.display = "block";
+      capture.insertBefore(st.target, st.sentinel ?? null);
+      for (const canvas of st.accelerated) canvas.style.visibility = "hidden";
+    }
+    st.route = route;
+  }
+
+  function targetRect(): { x: number; y: number; width: number; height: number } {
+    if (!state) throw new Error("prepare() must run first.");
+    const r = state.target.getBoundingClientRect();
+    return { x: r.left + window.scrollX, y: r.top + window.scrollY, width: state.cssWidth, height: state.cssHeight };
+  }
+
+  function boundaries(): number[] {
+    const times = new Set<number>();
+    for (const el of Array.from(document.querySelectorAll("[data-start]"))) {
+      const start = Number(el.getAttribute("data-start"));
+      const duration = Number(el.getAttribute("data-duration"));
+      if (!Number.isFinite(start)) continue;
+      // Nested clips count from their composition host; add the host offsets.
+      let offset = 0;
+      for (let host = el.parentElement?.closest("[data-composition-id][data-start]"); host; host = host.parentElement?.closest("[data-composition-id][data-start]")) {
+        offset += Number(host.getAttribute("data-start")) || 0;
+      }
+      times.add(offset + start);
+      if (Number.isFinite(duration) && duration > 0) times.add(offset + start + duration);
+    }
+    return [...times].filter((t) => t > 0).sort((a, b) => a - b);
+  }
+
+  // Copy of the last verification paint: the capture canvas loses its content once the
+  // composition moves out of it for a screenshot.
+  let verifyCopy: OffscreenCanvas | null = null;
+
+  async function paintOnly(): Promise<void> {
+    const { s, st } = requireSession();
+    if (st.mode !== "dom" || !st.capture) return;
+    setRoute("dom");
+    await paint(s, st);
+    verifyCopy ??= new OffscreenCanvas(s.o.width, s.o.height);
+    const ctx = verifyCopy.getContext("2d")!;
+    ctx.clearRect(0, 0, verifyCopy.width, verifyCopy.height);
+    ctx.drawImage(st.capture, 0, 0);
+  }
+
+  async function compareScreenshot(base64: string): Promise<number> {
+    const { s } = requireSession();
+    if (!verifyCopy || !s.shot) throw new Error("Nothing to compare: call paintOnly() first.");
+    await decodeInto(base64, s.shot);
+    // Compare at reduced size: missing or misplaced content shows, sub-pixel AA noise does not.
+    const w = Math.min(640, s.o.width);
+    const h = Math.max(1, Math.round((w * s.o.height) / s.o.width));
+    const read = (from: CanvasImageSource) => {
+      const c = new OffscreenCanvas(w, h);
+      const ctx = c.getContext("2d", { willReadFrequently: true })!;
+      ctx.drawImage(from, 0, 0, w, h);
+      return ctx.getImageData(0, 0, w, h).data;
+    };
+    const a = read(verifyCopy);
+    const b = read(s.shot);
+    let sum = 0;
+    for (let i = 0; i < a.length; i += 4) {
+      const dr = a[i]! - b[i]!;
+      const dg = a[i + 1]! - b[i + 1]!;
+      const db = a[i + 2]! - b[i + 2]!;
+      sum += dr * dr + dg * dg + db * db;
+    }
+    const mse = sum / ((a.length / 4) * 3);
+    return mse === 0 ? 100 : 10 * Math.log10((255 * 255) / mse);
   }
 
   async function run(startFrame: number, count: number, subframeOffsets: number[]): Promise<void> {
@@ -600,6 +742,28 @@ export function pageInstallRuntime(): void {
     };
   }
 
-  const api: FrameVeloPageApi = { prepare, begin, seek, sample, encode, run, end };
+  const api: FrameVeloPageApi = {
+    prepare,
+    begin,
+    seek,
+    sample,
+    sampleScreenshot,
+    encode,
+    run,
+    end,
+    setRoute,
+    targetRect,
+    boundaries,
+    paintOnly,
+    compareScreenshot,
+    captureDataUrl: () => {
+      if (!verifyCopy) return "";
+      const c = document.createElement("canvas");
+      c.width = verifyCopy.width;
+      c.height = verifyCopy.height;
+      c.getContext("2d")!.drawImage(verifyCopy, 0, 0);
+      return c.toDataURL("image/png");
+    },
+  };
   w.__fv = api;
 }

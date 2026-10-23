@@ -1,11 +1,12 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Browser } from "puppeteer-core";
-import { captureToFile, openCapturePage, preparePage, type CapturePage } from "./capture.ts";
+import { captureToFile, openCapturePage, preparePage, type CapturePage, type CapturePolicy } from "./capture.ts";
 import { chromeMajor, findChrome, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
 import { isHyperFramesHtml, loadHyperFrames, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
 import { defaultBitrate, evenDimension, frameCount, subframeOffsets, type Codec } from "./options.ts";
 import type { CaptureMode, PagePrepareResult, PageRenderStats, TimeDriver } from "./page-runtime.ts";
+import type { IntervalPlan } from "./planner.ts";
 import { serveDirectory, type StaticServer } from "./server.ts";
 import { VIRTUAL_TIME_SHIM } from "./virtual-time-shim.ts";
 
@@ -29,6 +30,10 @@ export interface RenderOptions {
   viewport?: { width: number; height: number };
   mode?: CaptureMode;
   selector?: string;
+  /** DOM pages: verify sampled frames against screenshots ("auto"), or force one capture route. */
+  capture?: CapturePolicy;
+  /** Verification PSNR below which an interval falls back to screenshot capture (default 30 dB). */
+  verifyThresholdDb?: number;
   codec?: Codec;
   /** Bits per second. */
   bitrate?: number;
@@ -70,6 +75,10 @@ export interface RenderResult {
   wallMs: number;
   renderMs: number;
   warnings: string[];
+  /** DOM capture: route and verification samples of each interval. */
+  plan: IntervalPlan[];
+  /** Frames captured through native screenshots instead of drawElementImage. */
+  screenshotFrames: number;
   page: PageRenderStats;
 }
 
@@ -173,8 +182,8 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       ...(useHyperFrames ? { expectHyperFrames: true } : {}),
     });
     warnings.push(...prepared.warnings);
-    if (prepared.mode === "dom" && chromeMajor(version) < MIN_DOM_CHROME_MAJOR) {
-      throw new Error(`DOM capture needs Chrome ${MIN_DOM_CHROME_MAJOR} or later; found ${version}.`);
+    if (prepared.mode === "dom" && prepared.drawElementReady && chromeMajor(version) < MIN_DOM_CHROME_MAJOR) {
+      warnings.push(`Chrome ${chromeMajor(version)} predates reliable drawElementImage (${MIN_DOM_CHROME_MAJOR}+); verification decides per interval`);
     }
 
     const fps = options.fps ?? prepared.fps ?? (useHyperFrames ? fpsFromHtml(html) : undefined) ?? 30;
@@ -212,6 +221,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     const audioPath = options.audio ? path.resolve(options.audio) : (site?.audioPath ?? undefined);
     const result = await captureToFile({
       page: capture.page,
+      prepared,
       output: options.output,
       fps,
       startFrame: Math.round(start * fps),
@@ -221,6 +231,9 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       codec,
       bitrate,
       subframeOffsets: subframeOffsets(options.subframes ?? 1, options.shutter ?? 0.5, fps),
+      ...(options.capture ? { capture: options.capture } : {}),
+      ...(options.verifyThresholdDb !== undefined ? { verifyThresholdDb: options.verifyThresholdDb } : {}),
+      onLog: log,
       ...(options.background ? { background: options.background } : {}),
       ...(audioPath ? { audio: { path: audioPath, offset: start, copy: !options.audio && Boolean(site?.audioPath) } } : {}),
       ...(beforeSample ? { beforeSample } : {}),
@@ -249,6 +262,8 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       wallMs: Math.round(performance.now() - t0),
       renderMs: result.renderMs,
       warnings,
+      plan: result.plan,
+      screenshotFrames: result.screenshotFrames,
       page: result.page,
     };
   } finally {

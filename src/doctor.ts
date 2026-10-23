@@ -1,4 +1,4 @@
-import { chromeMajor, findChrome, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
+import { chromeMajor, findChrome, isHeadlessShell, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
 import { detectAacEncoder, toolVersion } from "./ffmpeg.ts";
 import { loadHyperFrames } from "./hyperframes.ts";
 import { serveDirectory } from "./server.ts";
@@ -68,6 +68,14 @@ export async function runDoctor(options: { chromePath?: string; ffmpegPath?: str
   try {
     const version = await browser.version();
     checks.push({ name: "Chrome", ok: true, detail: `${version} (${chromePath})` });
+    checks.push({
+      name: "Lean browser (headless shell)",
+      ok: isHeadlessShell(chromePath),
+      optional: true,
+      detail: isHeadlessShell(chromePath)
+        ? "chrome-headless-shell"
+        : "using full Chrome; run `framevelo browser install` for about half the CPU and memory",
+    });
     const page = await browser.newPage();
     await page.goto(`${server.origin}/index.html`);
     const report = await page.evaluate(async () => {

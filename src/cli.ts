@@ -2,8 +2,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { findChrome, installHeadlessShell } from "./chrome.ts";
 import { runDoctor } from "./doctor.ts";
 import { parseBitrate, type Codec } from "./options.ts";
+import type { CapturePolicy } from "./capture.ts";
 import type { CaptureMode } from "./page-runtime.ts";
 import { render, type RenderOptions } from "./render.ts";
 
@@ -12,6 +14,9 @@ const HELP = `FrameVelo: a rendering accelerator for code-driven videos.
 Usage:
   framevelo render <input> [options]   Render an HTML page or project directory to MP4
   framevelo doctor [--chrome <path>]   Check Chrome, WebCodecs encoders and FFmpeg on this machine
+  framevelo browser install [version]  Install chrome-headless-shell (default: stable) into the
+                                       FrameVelo cache; about half the CPU and memory of full Chrome
+  framevelo browser path               Print the Chrome binary FrameVelo would use
   framevelo --version
 
 The page must be seekable: window.__framevelo = { seek(t), duration }, window.__seek(t), or a paused
@@ -29,6 +34,10 @@ Render options:
       --viewport <WxH>    CSS viewport (default: data-width/data-height, viewport meta, or 1920x1080)
       --mode <m>          auto | canvas | dom (default: auto)
       --selector <css>    Element (or canvas) to capture
+      --capture <c>       DOM pages: auto (verify sampled frames against native screenshots and
+                          fall back per interval), dom (drawElementImage only), screenshot
+                          (default: auto)
+      --verify-threshold <dB>  Verification PSNR below which an interval uses screenshots (default: 30)
       --codec <c>         h264 | hevc (default: h264)
       --bitrate <b>       Target bitrate, e.g. 12M (default: scales with size and fps)
       --audio <file>      Audio track to mux (AAC)
@@ -37,7 +46,8 @@ Render options:
       --background <css>  Color behind transparent DOM content (default: page background)
       --no-hyperframes    Render a HyperFrames project as a plain page instead of compiling it
                           with the official HyperFrames pipeline (@hyperframes/producer)
-      --chrome <path>     Chrome binary (default: FRAMEVELO_CHROME, installed Chrome, Puppeteer cache)
+      --chrome <path>     Chrome binary (default: FRAMEVELO_CHROME, newest chrome-headless-shell 151+
+                          in the FrameVelo/HyperFrames/Puppeteer caches, then installed Chrome)
       --json              Print the result as JSON
   -q, --quiet             No progress output
 `;
@@ -82,6 +92,8 @@ async function renderCommand(argv: string[]): Promise<void> {
       viewport: { type: "string" },
       mode: { type: "string" },
       selector: { type: "string" },
+      capture: { type: "string" },
+      "verify-threshold": { type: "string" },
       codec: { type: "string" },
       bitrate: { type: "string" },
       audio: { type: "string" },
@@ -133,6 +145,8 @@ async function renderCommand(argv: string[]): Promise<void> {
   assign("scale", numberOption("scale", values.scale));
   assign("mode", oneOf<CaptureMode>("mode", values.mode, ["auto", "canvas", "dom"]));
   assign("selector", values.selector);
+  assign("capture", oneOf<CapturePolicy>("capture", values.capture, ["auto", "dom", "screenshot"]));
+  assign("verifyThresholdDb", numberOption("verify-threshold", values["verify-threshold"]));
   assign("codec", oneOf<Codec>("codec", values.codec, ["h264", "hevc"]));
   assign("bitrate", values.bitrate === undefined ? undefined : parseBitrate(values.bitrate));
   assign("audio", values.audio);
@@ -149,7 +163,8 @@ async function renderCommand(argv: string[]): Promise<void> {
     const seconds = result.wallMs / 1000;
     process.stderr.write(
       `${path.relative(process.cwd(), result.output) || result.output}: ${result.frames} frames, ${result.width}x${result.height}, ` +
-        `${(result.bytes / 1e6).toFixed(1)} MB in ${seconds.toFixed(2)} s (${(result.frames / (result.renderMs / 1000)).toFixed(1)} fps render)\n`,
+        `${(result.bytes / 1e6).toFixed(1)} MB in ${seconds.toFixed(2)} s (${(result.frames / (result.renderMs / 1000)).toFixed(1)} fps render` +
+        `${result.screenshotFrames ? `, ${result.screenshotFrames} screenshot frames` : ""})\n`,
     );
   }
 }
@@ -168,6 +183,27 @@ async function doctorCommand(argv: string[]): Promise<void> {
   if (checks.some((check) => !check.ok && !check.optional)) process.exitCode = 1;
 }
 
+async function browserCommand(argv: string[]): Promise<void> {
+  const [action, buildId] = argv;
+  if (action === "path") {
+    const found = findChrome();
+    if (!found) throw new Error("No Chrome found. Run: framevelo browser install");
+    process.stdout.write(`${found}\n`);
+    return;
+  }
+  if (action !== "install") throw new Error('Usage: framevelo browser install [version|stable|beta] | framevelo browser path');
+  let last = 0;
+  const { buildId: installed, executablePath } = await installHeadlessShell(buildId ?? "stable", (done, total) => {
+    const percent = total ? Math.floor((done / total) * 100) : 0;
+    if (process.stderr.isTTY && percent !== last) {
+      last = percent;
+      process.stderr.write(`\r  downloading chrome-headless-shell: ${percent}%   `);
+    }
+  });
+  if (process.stderr.isTTY) process.stderr.write("\n");
+  process.stdout.write(`chrome-headless-shell ${installed}\n${executablePath}\n`);
+}
+
 async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   if (!command || command === "-h" || command === "--help" || command === "help") {
@@ -180,6 +216,7 @@ async function main(argv: string[]): Promise<void> {
   }
   if (command === "render") return renderCommand(rest);
   if (command === "doctor") return doctorCommand(rest);
+  if (command === "browser") return browserCommand(rest);
   throw new Error(`Unknown command "${command}". Run framevelo --help.`);
 }
 
