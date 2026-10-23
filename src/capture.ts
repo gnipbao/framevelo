@@ -232,6 +232,8 @@ interface Lane {
   hook: ((time: number) => Promise<void>) | undefined;
   /** Annex-B file the lane's encoder writes when the range is split; the main lane starts on the muxer. */
   part?: string;
+  /** The page took verification samples, so its timeline was seeked out of order. */
+  verified?: boolean;
 }
 
 /**
@@ -248,6 +250,7 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
   const main: Lane = { driver: pageDriver(job.page, job.width), hook: job.beforeSample };
   const opening: Array<Promise<Lane | null>> = [];
   const workers: CaptureWorker[] = [];
+  const rendering: Lane[] = [];
   const files: string[] = [];
 
   const audioEncoder = job.audio ? (job.audio.copy ? "copy" : await detectAacEncoder(job.ffmpegPath)) : undefined;
@@ -275,11 +278,12 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     };
     // Encoded bytes go to the muxer while one page renders everything, to a part file per page
     // when the range is split.
-    await attach(job.page, 0, async (bytes) => {
-      if (main.part) return appendFile(main.part, bytes);
+    const firstLaneSink = (lane: Lane) => async (bytes: Buffer) => {
+      if (lane.part) return appendFile(lane.part, bytes);
       if (streamDump) await appendFile(streamDump, bytes);
       await activeMux.write(bytes);
-    });
+    };
+    await attach(job.page, 0, firstLaneSink(main));
 
     const encodeOptions: PageEncodeOptions = {
       width: job.width,
@@ -341,11 +345,38 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     const driven = nodeDriven(routeOf);
     if (opening.length === 0) openLanes(laneCount(driven));
     const lanes = [main, ...(await Promise.all(opening)).filter((lane): lane is Lane => lane !== null)];
+    // Verification seeks the timeline out of order, quietly. Whatever a timeline callback wrote into
+    // the page (a GSAP onUpdate that sets a transform) is left at the last verified moment, and a
+    // quiet park before the first frame cannot bring it back; the official renderer never seeks
+    // backwards. Lanes that verified hand their range to fresh pages.
+    if (job.openWorker && lanes.some((lane) => lane.verified)) {
+      const f0 = performance.now();
+      let replaced = 0;
+      await Promise.all(
+        lanes.map(async (lane, i) => {
+          if (!lane.verified) return;
+          const worker = await job.openWorker!();
+          workers.push(worker);
+          const next: Lane = { driver: pageDriver(worker.page, job.width), hook: worker.beforeSample, ...(lane.part ? { part: lane.part } : {}) };
+          await attach(worker.page, i, i === 0 ? firstLaneSink(next) : (bytes) => appendFile(next.part!, bytes));
+          await begin(worker.page);
+          // Release the verified page's encoder; a worker page is closed outright.
+          if (lane === main) await job.page.evaluate(() => (window as unknown as FvWindow).__fv.end()).catch(() => {});
+          else await workers.find((w) => w.page === lane.driver.page)?.close().catch(() => {});
+          await lane.driver.detach();
+          lanes[i] = next;
+          replaced++;
+        }),
+      );
+      log(`verified pages replaced by ${replaced} fresh page${replaced === 1 ? "" : "s"} (${Math.round(performance.now() - f0)} ms)`);
+    }
+    rendering.push(...lanes);
     const ranges = splitRange(job.startFrame, job.frames, lanes.length);
     if (lanes.length > 1) {
-      main.part = partFile(0);
-      files.push(main.part);
-      await writeFile(main.part, "");
+      const first = lanes[0]!;
+      first.part = partFile(0);
+      files.push(first.part);
+      await writeFile(first.part, "");
       log(`${lanes.length} pages render ${driven} Node-driven frames in parallel`);
     }
 
@@ -414,7 +445,7 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     mux?.kill();
     // Let lanes still opening settle so their pages close too.
     const opened = await Promise.all(opening);
-    await Promise.all([main, ...opened].map((lane) => lane?.driver.detach()));
+    await Promise.all([main, ...opened, ...rendering].map((lane) => lane?.driver.detach()));
     await Promise.all(workers.map((w) => w.close().catch(() => {})));
     await Promise.all([staging, ...files].map((file) => rm(file, { force: true })));
   }
@@ -447,7 +478,8 @@ async function planRoutes(
   }
   const queue = [...new Set(intervals.flatMap(sampleFrames))];
   const psnrByFrame = new Map<number, number>();
-  const verifyOn = async ({ driver, hook }: Lane) => {
+  const verifyOn = async (lane: Lane) => {
+    const { driver, hook } = lane;
     const { page } = driver;
     // Verification seeks are administrative: quiet, so timeline callbacks fire only during the render.
     const quietSeekAndHook = async (t: number) => {
@@ -458,6 +490,7 @@ async function planRoutes(
       }
     };
     for (let frame = queue.shift(); frame !== undefined; frame = queue.shift()) {
+      lane.verified = true;
       const t = frame / job.fps;
       await quietSeekAndHook(t);
       await page.evaluate(() => (window as unknown as FvWindow).__fv.paintOnly());

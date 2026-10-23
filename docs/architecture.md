@@ -87,6 +87,14 @@ accounts for: the canvas loses its content (verification copies the paint first)
 restart (every route switch is followed by a seek), and iframes reload (pages with iframes skip
 verification; a forced screenshot route waits for the reload).
 
+Verification seeks out of order, quietly, and the HyperFrames runtime still settles each quiet seek
+on its target, so timeline callbacks there run. Whatever such a callback writes into the page (a GSAP
+`onUpdate` that applies a camera transform from a state object shared by several keys) is left at
+the last verified moment, and the quiet park before the first frame cannot undo it: a sequential
+render, like the official one, never seeks backwards. The first frames of a film would show a later
+camera. Pages that took verification samples therefore hand their range to fresh pages, opened like
+workers (about 0.4 s each); the verified main page only releases its encoder.
+
 ## HyperFrames projects
 
 A page with a `data-composition-id` root is rendered through the official pipeline when the optional
@@ -101,7 +109,11 @@ peer `@hyperframes/producer` is installed:
 4. Frames inside a video's window are driven from Node: the official `createVideoFrameInjector` swaps
    each `<video>` for its extracted frame (served same-origin), the canvas runs one paint event so the
    swapped image reaches the paint record, then the frame is painted. Other frames loop in the page.
-5. The plan's AAC mix is stream-copied into the MP4.
+5. The plan's AAC mix is stream-copied into the MP4. The plan is asked for it with
+   `chunksCarryAudio`, the mode in which the mix goes straight into the output: cut to the frame count
+   and held to the official −1 dBTP true peak (a static attenuation, re-measured, as
+   `hyperframes render` does when it assembles). Without it the plan leaves both to an assemble stage
+   FrameVelo does not run, and a hot mix came out several dB louder and clipping.
 
 Chrome starts while the project compiles.
 
