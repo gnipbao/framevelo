@@ -35,7 +35,9 @@ before(async () => {
   await writeFile(path.join(dir, "site", "index.html"), "<p>hi</p>");
   await writeFile(path.join(dir, "site", "nested", "app.js"), "export {}");
   await writeFile(path.join(dir, "outside.txt"), "secret");
-  server = await serveDirectory(path.join(dir, "site"));
+  await mkdir(path.join(dir, "proxies"));
+  await writeFile(path.join(dir, "proxies", "p.mp4"), "proxy");
+  server = await serveDirectory(path.join(dir, "site"), { mounts: { "/__framevelo/proxies": path.join(dir, "proxies") } });
 });
 after(async () => {
   await server.close();
@@ -70,6 +72,12 @@ test("serves byte ranges so media can seek", async () => {
   const beyond = await fetch(`${server.origin}/index.html`, { headers: { range: "bytes=50-" } });
   assert.equal(beyond.status, 416);
   await beyond.arrayBuffer();
+});
+
+test("serves mounted directories under their prefix, and only inside them", async () => {
+  assert.equal(await (await fetch(`${server.origin}/__framevelo/proxies/p.mp4`)).text(), "proxy");
+  const escape = await fetch(`${server.origin}/__framevelo/proxies/%2e%2e/outside.txt`);
+  assert.notEqual(await escape.text(), "secret");
 });
 
 test("rejects other methods and missing files", async () => {

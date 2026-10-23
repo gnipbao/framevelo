@@ -82,6 +82,10 @@ export interface FrameVeloPageApi {
    * in frame order.
    */
   seek(t: number, quiet?: boolean): Promise<void>;
+  /** Sources of the videos FrameVelo keeps on the composition clock, by index. */
+  managedVideoSources(): string[];
+  /** Point managed video `index` at another file (an all-intra proxy) and wait for it to load. */
+  replaceVideoSource(index: number, url: string): Promise<boolean>;
   /** Paint the current state as sub-frame `k`; with `encodeFrame`, also encode the finished frame. */
   sample(k: number, encodeFrame?: number): Promise<void>;
   /** Use a native screenshot (base64 JPEG/PNG) as sub-frame `k`; with `encodeFrame`, also encode. */
@@ -234,23 +238,27 @@ export function pageInstallRuntime(): void {
    * (t - data-start) * data-playback-rate, held at the ends of its data-duration window. Waits
    * for the seek and for the new frame to reach the compositor. Returns whether any frame changed.
    */
+  /** Seek `video` to `mediaTime` (plus a hair, so the frame starting exactly then is shown). */
+  function seekVideo(video: HTMLVideoElement, mediaTime: number, waits: Array<Promise<void>>): boolean {
+    const end = Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.001) : Infinity;
+    const target = Math.min(mediaTime + 1e-4, end);
+    if (Math.abs(video.currentTime - target) < 1e-6) return false;
+    video.currentTime = target;
+    waits.push(eventOrTimeout(video, "seeked", 5000));
+    return true;
+  }
+
   async function syncMedia(st: State, t: number): Promise<boolean> {
-    if (!st.media.length) return false;
     const waits: Array<Promise<void>> = [];
     let changed = false;
+    if (!st.media.length) return false;
     for (const video of st.media) {
       const start = mediaNumber(video, "data-start", 0);
       const mediaStart = mediaNumber(video, "data-media-start", 0);
       const duration = mediaNumber(video, "data-duration", Infinity);
       const rate = mediaNumber(video, "data-playback-rate", 1);
       const local = Math.min(Math.max(t - start, 0), duration);
-      const end = Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.001) : Infinity;
-      // A hair past the frame time so the frame that starts exactly at t is the one shown.
-      const mediaTime = Math.min(mediaStart + local * rate + 1e-4, end);
-      if (Math.abs(video.currentTime - mediaTime) < 1e-6) continue;
-      changed = true;
-      video.currentTime = mediaTime;
-      waits.push(eventOrTimeout(video, "seeked", 5000));
+      if (seekVideo(video, mediaStart + local * rate, waits)) changed = true;
     }
     await Promise.all(waits);
     if (changed) st.dirty = true;
@@ -736,6 +744,20 @@ export function pageInstallRuntime(): void {
     return { hardwareFallback: s.hardwareFallback };
   }
 
+  function managedVideoSources(): string[] {
+    return state ? state.media.map((video) => video.currentSrc || video.src) : [];
+  }
+
+  async function replaceVideoSource(index: number, url: string): Promise<boolean> {
+    const video = state?.media[index];
+    if (!video) return false;
+    video.src = url;
+    video.load();
+    await eventOrTimeout(video, "loadeddata", 15_000);
+    video.pause();
+    return video.readyState >= 2;
+  }
+
   async function seek(t: number, quiet = false): Promise<void> {
     const { s, st } = requireSession();
     const s0 = clock.now();
@@ -959,6 +981,8 @@ export function pageInstallRuntime(): void {
     prepare,
     begin,
     seek,
+    managedVideoSources,
+    replaceVideoSource,
     sample,
     sampleScreenshot,
     encode,

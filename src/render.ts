@@ -2,12 +2,13 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Browser } from "puppeteer-core";
 import { captureToFile, openCapturePage, preparePage, type CapturePage, type CapturePolicy, type CaptureResult } from "./capture.ts";
-import { chromeMajor, findChrome, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
+import { chromeMajor, findChrome, framevelCacheDir, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
+import { ensureProxy } from "./media-proxy.ts";
 import { isHyperFramesHtml, loadHyperFrames, PAGE_SIDE_COMPOSITING_FLAG, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
 import { defaultBitrate, evenDimension, frameCount, subframeOffsets, type Codec, type Quality } from "./options.ts";
-import type { CaptureMode, PagePrepareResult, PageRenderStats, TimeDriver } from "./page-runtime.ts";
+import type { CaptureMode, FrameVeloPageApi, PagePrepareResult, PageRenderStats, TimeDriver } from "./page-runtime.ts";
 import type { IntervalPlan } from "./planner.ts";
-import { serveDirectory, type StaticServer } from "./server.ts";
+import { resolveInsideRoot, serveDirectory, type StaticServer } from "./server.ts";
 import { VIRTUAL_TIME_SHIM } from "./virtual-time-shim.ts";
 
 export interface RenderOptions {
@@ -46,6 +47,11 @@ export interface RenderOptions {
   subframes?: number;
   shutter?: number;
   background?: string;
+  /**
+   * Plain pages: replace <video data-start> sources that are not all-intra with cached all-intra
+   * proxies so every seek decodes one frame (default true).
+   */
+  videoProxies?: boolean;
   /**
    * How to treat a HyperFrames project (a page with a data-composition-id root): "auto" compiles and
    * serves it with the official HyperFrames pipeline when @hyperframes/producer is installed;
@@ -126,6 +132,41 @@ export function videoWindows(videos: unknown[]): Array<[number, number]> | null 
   return windows;
 }
 
+const PROXY_URL_PREFIX = "/__framevelo/proxies/";
+const proxyCacheDir = () => path.join(framevelCacheDir(), "proxies");
+
+/** Swap long-GOP sources of managed videos for all-intra proxies (built once, then cached). */
+async function useVideoProxies(
+  capture: CapturePage,
+  root: string,
+  origin: string,
+  options: Pick<RenderOptions, "ffmpegPath" | "ffprobePath">,
+  log: (message: string) => void,
+): Promise<void> {
+  type FvWindow = { __fv: FrameVeloPageApi };
+  const sources = await capture.page.evaluate(() => (window as unknown as FvWindow).__fv.managedVideoSources());
+  for (const [index, src] of sources.entries()) {
+    if (!src.startsWith(`${origin}/`)) continue;
+    const file = resolveInsideRoot(root, new URL(src).pathname);
+    if (!file) continue;
+    const started = performance.now();
+    try {
+      const result = await ensureProxy(file, {
+        cacheDir: proxyCacheDir(),
+        ...(options.ffmpegPath ? { ffmpegPath: options.ffmpegPath } : {}),
+        ...(options.ffprobePath ? { ffprobePath: options.ffprobePath } : {}),
+      });
+      if (!result.proxy) continue;
+      const url = `${origin}${PROXY_URL_PREFIX}${encodeURIComponent(path.basename(result.proxy))}`;
+      const loaded = await capture.page.evaluate((i, u) => (window as unknown as FvWindow).__fv.replaceVideoSource(i, u), index, url);
+      log(`video ${path.relative(root, file)}: all-intra proxy ${result.reason}${result.reason.startsWith("built") ? ` in ${Math.round(performance.now() - started)} ms` : ""}${loaded ? "" : " (failed to load; keeping the original)"}`);
+      if (!loaded) await capture.page.evaluate((i, u) => (window as unknown as FvWindow).__fv.replaceVideoSource(i, u), index, src);
+    } catch (error) {
+      log(`video ${path.relative(root, file)}: no proxy (${error instanceof Error ? error.message.split("\n")[0] : String(error)})`);
+    }
+  }
+}
+
 /** data-fps on the composition root, read before compiling. */
 export function fpsFromHtml(html: string): number | undefined {
   const root = /<[^>]*\bdata-composition-id\b[^>]*>/i.exec(html)?.[0] ?? "";
@@ -177,7 +218,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       // The compiled entry is always index.html; a non-index input file is compiled as the project root.
       if (path.basename(file) !== "index.html") warnings.push(`compiled ${root} as a HyperFrames project (entry index.html)`);
     } else {
-      server = await serveDirectory(root);
+      server = await serveDirectory(root, { mounts: { [PROXY_URL_PREFIX]: proxyCacheDir() } });
       url = `${server.origin}/${path.relative(root, file).split(path.sep).map(encodeURIComponent).join("/")}`;
     }
 
@@ -198,6 +239,9 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       warnings.push(`Chrome ${chromeMajor(version)} predates reliable drawElementImage (${MIN_DOM_CHROME_MAJOR}+); verification decides per interval`);
     }
 
+    if (prepared.managedVideos > 0 && server && options.videoProxies !== false) {
+      await useVideoProxies(capture, root, server.origin, options, log);
+    }
     const prepareMs = performance.now() - p0;
     const fps = options.fps ?? prepared.fps ?? (useHyperFrames ? fpsFromHtml(html) : undefined) ?? 30;
     const start = options.start ?? 0;

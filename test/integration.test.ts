@@ -16,6 +16,8 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
   let dir: string;
   before(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "framevelo-it-"));
+    // Keep video proxies out of the user's cache.
+    process.env.FRAMEVELO_CACHE_DIR = path.join(dir, "cache");
   });
   after(async () => {
     await rm(dir, { recursive: true, force: true });

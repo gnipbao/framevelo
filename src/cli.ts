@@ -39,6 +39,8 @@ Render options:
                           (default: auto)
       --verify-threshold <dB>  Verification PSNR below which an interval uses screenshots (default: 30)
       --no-paint-reuse    Repaint every frame, even when a seek changed nothing in the composition
+      --no-video-proxy    Plain pages: seek <video data-start> sources as they are instead of cached
+                          all-intra proxies (slow for long keyframe intervals)
       --codec <c>         h264 | hevc (default: h264)
       --quality <q>       draft | standard | high: bitrate preset (default: standard, about x264 CRF 18)
       --bitrate <b>       Target bitrate, e.g. 12M; overrides --quality
@@ -97,6 +99,7 @@ async function renderCommand(argv: string[]): Promise<void> {
       capture: { type: "string" },
       "verify-threshold": { type: "string" },
       "no-paint-reuse": { type: "boolean" },
+      "no-video-proxy": { type: "boolean" },
       codec: { type: "string" },
       bitrate: { type: "string" },
       quality: { type: "string" },
@@ -152,6 +155,7 @@ async function renderCommand(argv: string[]): Promise<void> {
   assign("capture", oneOf<CapturePolicy>("capture", values.capture, ["auto", "dom", "screenshot"]));
   assign("verifyThresholdDb", numberOption("verify-threshold", values["verify-threshold"]));
   if (values["no-paint-reuse"]) options.reusePaints = false;
+  if (values["no-video-proxy"]) options.videoProxies = false;
   assign("codec", oneOf<Codec>("codec", values.codec, ["h264", "hevc"]));
   assign("bitrate", values.bitrate === undefined ? undefined : parseBitrate(values.bitrate));
   assign("quality", oneOf<Quality>("quality", values.quality, ["draft", "standard", "high"]));

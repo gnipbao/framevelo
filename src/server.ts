@@ -78,15 +78,18 @@ export function parseRange(header: string | undefined, size: number): { start: n
  * load its relative assets. Only GET/HEAD, only files inside `root`. Byte ranges are supported:
  * Chrome needs them to seek in audio and video files.
  */
-export async function serveDirectory(root: string): Promise<StaticServer> {
+export async function serveDirectory(root: string, options: { mounts?: Record<string, string> } = {}): Promise<StaticServer> {
   const absoluteRoot = path.resolve(root);
+  // Extra directories served under a URL prefix such as "/__framevelo/proxies/".
+  const mounts = Object.entries(options.mounts ?? {}).map(([prefix, dir]) => [prefix.endsWith("/") ? prefix : `${prefix}/`, path.resolve(dir)] as const);
   const server: Server = createServer(async (req, res) => {
     if (req.method !== "GET" && req.method !== "HEAD") {
       res.writeHead(405).end();
       return;
     }
     const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
-    let filePath = resolveInsideRoot(absoluteRoot, pathname);
+    const mount = mounts.find(([prefix]) => pathname.startsWith(prefix));
+    let filePath = mount ? resolveInsideRoot(mount[1], `/${pathname.slice(mount[0].length)}`) : resolveInsideRoot(absoluteRoot, pathname);
     if (!filePath) {
       res.writeHead(403).end();
       return;
