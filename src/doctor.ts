@@ -1,5 +1,6 @@
 import { chromeMajor, findChrome, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
 import { detectAacEncoder, toolVersion } from "./ffmpeg.ts";
+import { loadHyperFrames } from "./hyperframes.ts";
 import { serveDirectory } from "./server.ts";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -33,6 +34,18 @@ export async function runDoctor(options: { chromePath?: string; ffmpegPath?: str
   if (ffmpeg) {
     const aac = await detectAacEncoder(options.ffmpegPath);
     checks.push({ name: "AAC encoder", ok: true, optional: true, detail: aac === "aac_at" ? "aac_at (AudioToolbox)" : "aac (FFmpeg built-in)" });
+  }
+
+  try {
+    const api = await loadHyperFrames();
+    checks.push({ name: "HyperFrames projects", ok: true, optional: true, detail: `@hyperframes/producer ${api.version}` });
+  } catch {
+    checks.push({
+      name: "HyperFrames projects",
+      ok: false,
+      optional: true,
+      detail: "@hyperframes/producer not installed; HyperFrames projects render as plain pages",
+    });
   }
 
   let chromePath: string | null = null;

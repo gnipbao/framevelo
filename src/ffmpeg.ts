@@ -11,6 +11,7 @@ export interface MuxArgsOptions {
   audio?: string;
   /** Seconds to skip at the start of the audio, to stay in sync with a render that starts late. */
   audioOffset?: number;
+  /** FFmpeg audio encoder, or "copy" for an audio track that is already AAC. */
   audioEncoder?: string;
   audioBitrate?: string;
 }
@@ -55,7 +56,11 @@ export function buildMuxArgs(options: MuxArgsOptions): string[] {
     "-bsf:v",
     `${metadataFilter},${timestampFilter}`,
     ...(codec === "hevc" ? ["-tag:v", "hvc1"] : []),
-    ...(audio ? ["-c:a", options.audioEncoder ?? "aac", "-b:a", options.audioBitrate ?? "192k", "-shortest"] : []),
+    ...(audio
+      ? options.audioEncoder === "copy"
+        ? ["-c:a", "copy", "-shortest"]
+        : ["-c:a", options.audioEncoder ?? "aac", "-b:a", options.audioBitrate ?? "192k", "-shortest"]
+      : []),
     "-movflags",
     "+faststart",
     "-f",

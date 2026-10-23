@@ -14,3 +14,9 @@ coverage/
 *.h265
 out/
 renders/
+
+# HyperFrames CLI state written into projects
+.hyperframes/
+
+# example media is part of the repo
+!examples/**/assets/*.mp4

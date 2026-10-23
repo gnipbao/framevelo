@@ -1,27 +1,13 @@
-import { randomBytes } from "node:crypto";
-import { readFile, rename, rm, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Browser } from "puppeteer-core";
+import { captureToFile, openCapturePage, preparePage, type CapturePage } from "./capture.ts";
 import { chromeMajor, findChrome, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
-import { buildMuxArgs, detectAacEncoder, probeVideo, startMux } from "./ffmpeg.ts";
-import {
-  codecString,
-  defaultBitrate,
-  evenDimension,
-  frameCount,
-  keyframeInterval,
-  subframeOffsets,
-  type Codec,
-} from "./options.ts";
-import {
-  pagePrepare,
-  pageRender,
-  type CaptureMode,
-  type PagePrepareResult,
-  type PageRenderOptions,
-  type PageRenderStats,
-} from "./page-runtime.ts";
-import { serveDirectory } from "./server.ts";
+import { isHyperFramesHtml, loadHyperFrames, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
+import { defaultBitrate, evenDimension, frameCount, subframeOffsets, type Codec } from "./options.ts";
+import type { CaptureMode, PagePrepareResult, PageRenderStats, TimeDriver } from "./page-runtime.ts";
+import { serveDirectory, type StaticServer } from "./server.ts";
+import { VIRTUAL_TIME_SHIM } from "./virtual-time-shim.ts";
 
 export interface RenderOptions {
   /** An .html file, or a directory containing index.html. */
@@ -46,10 +32,17 @@ export interface RenderOptions {
   codec?: Codec;
   /** Bits per second. */
   bitrate?: number;
+  /** Audio file to mux. For HyperFrames projects it replaces the composition's own mix. */
   audio?: string;
   subframes?: number;
   shutter?: number;
   background?: string;
+  /**
+   * How to treat a HyperFrames project (a page with a data-composition-id root): "auto" compiles and
+   * serves it with the official HyperFrames pipeline when @hyperframes/producer is installed;
+   * "off" renders it as a plain seekable page.
+   */
+  hyperframes?: "auto" | "off";
   chromePath?: string;
   ffmpegPath?: string;
   ffprobePath?: string;
@@ -67,12 +60,16 @@ export interface RenderResult {
   codec: Codec;
   bitrate: number;
   mode: "canvas" | "dom";
-  driver: PagePrepareResult["driver"];
+  driver: TimeDriver;
+  /** "hyperframes" when the official HyperFrames compiler and runtime prepared the page. */
+  pipeline: "page" | "hyperframes";
   chrome: string;
   hardwareEncoder: boolean;
+  audio: boolean;
   bytes: number;
   wallMs: number;
   renderMs: number;
+  warnings: string[];
   page: PageRenderStats;
 }
 
@@ -98,57 +95,89 @@ export function viewportFromHtml(html: string): { width: number; height: number 
   return null;
 }
 
+/**
+ * Composition-time windows [start, end) of the planned videos, or null when any window is unknown
+ * (then every frame goes through the injector).
+ */
+export function videoWindows(videos: unknown[]): Array<[number, number]> | null {
+  const windows: Array<[number, number]> = [];
+  for (const video of videos) {
+    const { start, end } = video as { start?: unknown; end?: unknown };
+    if (typeof start !== "number" || typeof end !== "number" || !Number.isFinite(start) || !Number.isFinite(end)) return null;
+    windows.push([start, end]);
+  }
+  return windows;
+}
+
+/** data-fps on the composition root, read before compiling. */
+export function fpsFromHtml(html: string): number | undefined {
+  const root = /<[^>]*\bdata-composition-id\b[^>]*>/i.exec(html)?.[0] ?? "";
+  const fps = Number(/\bdata-fps\s*=\s*["']?([\d.]+)/i.exec(root)?.[1]);
+  return Number.isFinite(fps) && fps > 0 ? fps : undefined;
+}
+
 export async function render(options: RenderOptions): Promise<RenderResult> {
   const t0 = performance.now();
   const log = options.onLog ?? (() => {});
   const codec: Codec = options.codec ?? "h264";
   const { root, file } = await resolveInput(options.input);
-  const viewport = options.viewport ?? viewportFromHtml(await readFile(file, "utf8")) ?? { width: 1920, height: 1080 };
+  const html = await readFile(file, "utf8");
+  const viewport = options.viewport ?? viewportFromHtml(html) ?? { width: 1920, height: 1080 };
+  const useHyperFrames = options.hyperframes !== "off" && isHyperFramesHtml(html);
 
   const chromePath = findChrome(options.chromePath ? { explicitPath: options.chromePath } : {});
   if (!chromePath) {
     throw new Error("Chrome not found. Install Google Chrome, or pass --chrome / set FRAMEVELO_CHROME to a Chrome 151+ binary.");
   }
 
-  const output = path.resolve(options.output);
-  const staging = path.join(path.dirname(output), `.${path.basename(output)}.${randomBytes(4).toString("hex")}.partial.mp4`);
-  const server = await serveDirectory(root);
+  let site: HyperFramesSite | undefined;
+  let server: StaticServer | undefined;
   let browser: Browser | undefined;
-  let mux: ReturnType<typeof startMux> | undefined;
+  const warnings: string[] = [];
+  // Chrome starts while the project compiles; neither needs the other.
+  const browserLaunch = launchChrome(chromePath);
+  browserLaunch.catch(() => {});
   try {
-    browser = await launchChrome(chromePath);
+    let url: string;
+    if (useHyperFrames) {
+      const api = await loadHyperFrames();
+      const fps = options.fps ?? fpsFromHtml(html) ?? 30;
+      log(`hyperframes project: compiling with @hyperframes/producer ${api.version}`);
+      site = await prepareHyperFramesSite(api, {
+        projectDir: root,
+        width: viewport.width,
+        height: viewport.height,
+        fps,
+        preHeadScripts: [VIRTUAL_TIME_SHIM],
+        onLog: log,
+      });
+      if (site.videos && site.planFps !== fps) {
+        warnings.push(`video frames were extracted at ${site.planFps} fps for a ${fps} fps render; video motion is approximate`);
+      }
+      url = site.url;
+      // The compiled entry is always index.html; a non-index input file is compiled as the project root.
+      if (path.basename(file) !== "index.html") warnings.push(`compiled ${root} as a HyperFrames project (entry index.html)`);
+    } else {
+      server = await serveDirectory(root);
+      url = `${server.origin}/${path.relative(root, file).split(path.sep).map(encodeURIComponent).join("/")}`;
+    }
+
+    browser = await browserLaunch;
     const version = await browser.version();
     log(`chrome ${version} (${chromePath})`);
-
-    const page = await browser.newPage();
-    await page.setViewport({ width: viewport.width, height: viewport.height, deviceScaleFactor: 1 });
-    const pageErrors: string[] = [];
-    page.on("pageerror", (error) => pageErrors.push(error instanceof Error ? error.message : String(error)));
-    // HyperFrames compositions assign into a registry its runtime normally creates first.
-    await page.evaluateOnNewDocument(() => {
-      const w = window as unknown as { __timelines?: Record<string, unknown> };
-      w.__timelines ??= {};
+    const capture: CapturePage = await openCapturePage(browser, url, viewport);
+    const prepared: PagePrepareResult = await preparePage(capture, {
+      mode: useHyperFrames ? "dom" : (options.mode ?? "auto"),
+      ...(options.selector ? { selector: options.selector } : {}),
+      readyTimeoutMs: options.readyTimeoutMs ?? (useHyperFrames ? 45_000 : 10_000),
+      ...(useHyperFrames ? { expectHyperFrames: true } : {}),
     });
-
-    const url = `${server.origin}/${path.relative(root, file).split(path.sep).map(encodeURIComponent).join("/")}`;
-    await page.goto(url, { waitUntil: "load" });
-
-    let prepared: PagePrepareResult;
-    try {
-      prepared = await page.evaluate(pagePrepare, {
-        mode: options.mode ?? "auto",
-        ...(options.selector ? { selector: options.selector } : {}),
-        readyTimeoutMs: options.readyTimeoutMs ?? 10_000,
-      });
-    } catch (error) {
-      const detail = pageErrors.length ? `\nPage errors:\n  ${pageErrors.slice(0, 5).join("\n  ")}` : "";
-      throw new Error(`${error instanceof Error ? error.message : String(error)}${detail}`);
-    }
+    warnings.push(...prepared.warnings);
     if (prepared.mode === "dom" && chromeMajor(version) < MIN_DOM_CHROME_MAJOR) {
       throw new Error(`DOM capture needs Chrome ${MIN_DOM_CHROME_MAJOR} or later; found ${version}.`);
     }
 
-    const fps = options.fps ?? prepared.fps ?? 30;
+    const fps = options.fps ?? prepared.fps ?? (useHyperFrames ? fpsFromHtml(html) : undefined) ?? 30;
     const start = options.start ?? 0;
     const duration = options.duration ?? (prepared.duration !== undefined ? prepared.duration - start : undefined);
     const frames = options.frames ?? (duration !== undefined ? frameCount(duration, fps) : undefined);
@@ -162,57 +191,48 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     const height = evenDimension(options.height ?? baseHeight * scale);
     const bitrate = options.bitrate ?? defaultBitrate(width, height, fps, codec);
     log(`${prepared.mode} capture via ${prepared.driver}: ${frames} frames at ${fps} fps, ${width}x${height}, ${codec} ${(bitrate / 1e6).toFixed(1)} Mbps`);
+    for (const warning of warnings) log(`warning: ${warning}`);
 
-    const audioEncoder = options.audio ? await detectAacEncoder(options.ffmpegPath) : undefined;
-    mux = startMux(
-      buildMuxArgs({
-        codec,
-        fps,
-        output: staging,
-        ...(options.audio ? { audio: path.resolve(options.audio), audioOffset: start } : {}),
-        ...(audioEncoder ? { audioEncoder } : {}),
-      }),
-      options.ffmpegPath,
-    );
-    const activeMux = mux;
-    await page.exposeFunction("__fvChunk", (base64: string) => activeMux.write(Buffer.from(base64, "base64")));
-    await page.exposeFunction("__fvProgress", (done: number) => options.onProgress?.(done, frames));
+    // The official injector swaps <video> elements for pre-extracted frames after each seek.
+    let beforeSample: ((time: number) => Promise<void>) | undefined;
+    let needsBeforeSample: ((time: number) => boolean) | undefined;
+    if (site?.videos) {
+      const api = await loadHyperFrames();
+      const lookup = api.engine.createFrameLookupTable(site.videos.videos, site.videos.extracted, site.planFps);
+      const inject = api.producer.createVideoFrameInjector(lookup);
+      if (inject) {
+        beforeSample = (time) => inject(capture.page, time);
+        // Only frames inside a video's window (one frame of margin) need the round trip.
+        const windows = videoWindows(site.videos.videos);
+        const margin = 1 / fps;
+        needsBeforeSample = windows ? (t) => windows.some(([a, b]) => t >= a - margin && t < b + margin) : undefined;
+      }
+    }
 
-    const renderOptions: PageRenderOptions = {
-      width,
-      height,
+    const audioPath = options.audio ? path.resolve(options.audio) : (site?.audioPath ?? undefined);
+    const result = await captureToFile({
+      page: capture.page,
+      output: options.output,
       fps,
       startFrame: Math.round(start * fps),
       frames,
-      codec: codecString(codec, width, height, fps),
+      width,
+      height,
+      codec,
       bitrate,
-      keyframeInterval: keyframeInterval(fps),
       subframeOffsets: subframeOffsets(options.subframes ?? 1, options.shutter ?? 0.5, fps),
-      hardwareAcceleration: "prefer-hardware",
-      maxEncodeQueue: 4,
-      chunkBytes: 2 << 20,
-      paintTimeoutMs: 10_000,
       ...(options.background ? { background: options.background } : {}),
-    };
-    const r0 = performance.now();
-    const pageStats = await page.evaluate(pageRender, renderOptions);
-    const renderMs = performance.now() - r0;
-    if (pageStats.hardwareFallback) log("hardware encoder unavailable for this configuration; Chrome chose its own encoder");
-
-    await mux.finish();
-    mux = undefined;
-
-    const probe = await probeVideo(staging, options.ffprobePath);
-    if (probe.packets !== frames) throw new Error(`Encoded ${probe.packets} video packets, expected ${frames}.`);
-    if (probe.width !== width || probe.height !== height) {
-      throw new Error(`Output is ${probe.width}x${probe.height}, expected ${width}x${height}.`);
-    }
-    if (options.audio && !probe.audioCodec) throw new Error("The audio track is missing from the output.");
-    await rename(staging, output);
-    const { size } = await stat(output);
+      ...(audioPath ? { audio: { path: audioPath, offset: start, copy: !options.audio && Boolean(site?.audioPath) } } : {}),
+      ...(beforeSample ? { beforeSample } : {}),
+      ...(needsBeforeSample ? { needsBeforeSample } : {}),
+      ...(options.ffmpegPath ? { ffmpegPath: options.ffmpegPath } : {}),
+      ...(options.ffprobePath ? { ffprobePath: options.ffprobePath } : {}),
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+    });
+    if (result.page.hardwareFallback) log("hardware encoder unavailable for this configuration; Chrome chose its own encoder");
 
     return {
-      output,
+      output: result.output,
       frames,
       fps,
       width,
@@ -221,17 +241,21 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       bitrate,
       mode: prepared.mode,
       driver: prepared.driver,
+      pipeline: useHyperFrames ? "hyperframes" : "page",
       chrome: version,
-      hardwareEncoder: !pageStats.hardwareFallback,
-      bytes: size,
+      hardwareEncoder: !result.page.hardwareFallback,
+      audio: Boolean(result.probe.audioCodec),
+      bytes: result.bytes,
       wallMs: Math.round(performance.now() - t0),
-      renderMs: Math.round(renderMs),
-      page: pageStats,
+      renderMs: result.renderMs,
+      warnings,
+      page: result.page,
     };
   } finally {
-    mux?.kill();
+    browser ??= await browserLaunch.catch(() => undefined);
     await browser?.close().catch(() => {});
-    await server.close();
-    await rm(staging, { force: true });
+    await server?.close();
+    await site?.close();
   }
 }
+

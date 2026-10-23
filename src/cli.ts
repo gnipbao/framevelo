@@ -35,6 +35,8 @@ Render options:
       --subframes <n>     Sub-frames averaged per frame for motion blur (default: 1)
       --shutter <f>       Fraction of the frame interval the sub-frames span (default: 0.5)
       --background <css>  Color behind transparent DOM content (default: page background)
+      --no-hyperframes    Render a HyperFrames project as a plain page instead of compiling it
+                          with the official HyperFrames pipeline (@hyperframes/producer)
       --chrome <path>     Chrome binary (default: FRAMEVELO_CHROME, installed Chrome, Puppeteer cache)
       --json              Print the result as JSON
   -q, --quiet             No progress output
@@ -87,6 +89,7 @@ async function renderCommand(argv: string[]): Promise<void> {
       shutter: { type: "string" },
       background: { type: "string" },
       chrome: { type: "string" },
+      "no-hyperframes": { type: "boolean" },
       json: { type: "boolean" },
       quiet: { type: "boolean", short: "q" },
     },
@@ -137,6 +140,7 @@ async function renderCommand(argv: string[]): Promise<void> {
   assign("shutter", numberOption("shutter", values.shutter, (n) => n >= 0 && n <= 1));
   assign("background", values.background);
   assign("chromePath", values.chrome);
+  if (values["no-hyperframes"]) options.hyperframes = "off";
 
   const result = await render(options);
   if (values.json) {

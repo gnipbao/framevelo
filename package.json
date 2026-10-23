@@ -32,7 +32,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.18"
@@ -49,7 +50,21 @@
   "dependencies": {
     "puppeteer-core": "25.13.0"
   },
+  "peerDependencies": {
+    "@hyperframes/producer": ">=0.8.186 <0.9.0",
+    "@hyperframes/engine": ">=0.8.186 <0.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@hyperframes/producer": {
+      "optional": true
+    },
+    "@hyperframes/engine": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@hyperframes/engine": "0.8.186",
+    "@hyperframes/producer": "0.8.186",
     "@types/node": "22.20.5",
     "typescript": "7.0.2"
   }

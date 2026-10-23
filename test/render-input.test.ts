@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { resolveInput, viewportFromHtml } from "../src/render.ts";
+import { fpsFromHtml, resolveInput, videoWindows, viewportFromHtml } from "../src/render.ts";
 
 test("viewportFromHtml prefers the HyperFrames root size", () => {
   const html = `<meta name="viewport" content="width=800, height=600" />
@@ -29,4 +29,17 @@ test("resolveInput accepts a file or a directory with index.html", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("fpsFromHtml reads data-fps from the composition root only", () => {
+  assert.equal(fpsFromHtml(`<div data-composition-id="main" data-fps="60" data-width="1920"></div>`), 60);
+  assert.equal(fpsFromHtml(`<div data-composition-id="main"></div>`), undefined);
+  assert.equal(fpsFromHtml(`<div data-fps="24"></div>`), undefined);
+});
+
+test("videoWindows returns start/end pairs, or null when any is unknown", () => {
+  assert.deepEqual(videoWindows([{ start: 1, end: 4 }, { start: 5, end: 6.5 }]), [[1, 4], [5, 6.5]]);
+  assert.deepEqual(videoWindows([]), []);
+  assert.equal(videoWindows([{ start: 1 }]), null);
+  assert.equal(videoWindows([{ start: 1, end: Infinity }]), null);
 });

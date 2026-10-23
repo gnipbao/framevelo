@@ -45,3 +45,10 @@ test("audio is mapped, encoded, trimmed to the video and offset by the start tim
 test("no audio offset when rendering from the start", () => {
   assert.ok(!buildMuxArgs({ codec: "h264", fps: 30, output: "o.mp4", audio: "a.wav", audioOffset: 0 }).includes("-ss"));
 });
+
+test("an AAC track can be copied instead of re-encoded", () => {
+  const args = buildMuxArgs({ codec: "h264", fps: 30, output: "o.mp4", audio: "mix.m4a", audioEncoder: "copy" });
+  assert.equal(valueAfter(args, "-c:a"), "copy");
+  assert.ok(!args.includes("-b:a"));
+  assert.ok(args.includes("-shortest"));
+});

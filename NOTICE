@@ -1,0 +1,8 @@
+FrameVelo
+Copyright 2026 gnipbao
+
+This product includes software derived from HyperFrames
+(https://github.com/heygen-com/hyperframes), Copyright HeyGen, Inc.,
+licensed under the Apache License, Version 2.0:
+  - src/virtual-time-shim.ts: port of the virtual-time shim from
+    packages/producer/src/services/fileServer.ts

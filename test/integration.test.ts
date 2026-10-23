@@ -1,6 +1,6 @@
 // End-to-end renders through real Chrome and FFmpeg. Enabled with FRAMEVELO_INTEGRATION=1.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -61,6 +61,27 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     assert.equal(probe.packets, 20);
     assert.equal(probe.audioCodec, "aac");
     assert.equal(lastProgress, 20);
+  });
+
+  test("HyperFrames project: official compile and runtime, injected video, plan audio", async () => {
+    const output = path.join(dir, "hyperframes.mp4");
+    // Frames 15..44 (0.5 s to 1.5 s) cross the b-roll's entrance at 1 s.
+    const result = await render({ input: path.join(examples, "hyperframes-project"), output, start: 0.5, frames: 30 });
+    assert.equal(result.pipeline, "hyperframes");
+    assert.equal(result.driver, "hyperframes");
+    assert.equal(result.audio, true);
+    const probe = await probeVideo(output);
+    assert.equal(probe.packets, 30);
+    assert.equal(probe.audioCodec, "aac");
+    // The b-roll box is empty before 1 s and shows the injected test pattern after it.
+    const crop = "crop=600:300:1100:300";
+    const { stderr } = spawnSync(
+      "ffmpeg",
+      ["-hide_banner", "-i", output, "-i", output, "-lavfi", `[0:v]select=eq(n\\,5),${crop},setpts=0[a];[1:v]select=eq(n\\,25),${crop},setpts=0[b];[a][b]psnr`, "-f", "null", "-"],
+      { encoding: "utf8" },
+    );
+    const psnr = Number(/average:([\d.]+)/.exec(stderr)?.[1]);
+    assert.ok(psnr > 0 && psnr < 20, `the video region should change once the b-roll is injected (PSNR ${psnr} dB)`);
   });
 
   test("a page without a time driver fails clearly and leaves no partial file", async () => {
