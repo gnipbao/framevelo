@@ -44,6 +44,7 @@ interface DistributedApi {
     projectDir: string,
     config: { fps: number; width: number; height: number; format: "mp4"; logger?: ProducerLogger },
     planDir: string,
+    options?: { chunksCarryAudio?: boolean },
   ): Promise<{ totalFrames: number; fps: number; width: number; height: number; producerVersion: string }>;
   resolvePlanAudioPath(planDir: string): string | null;
 }
@@ -209,8 +210,16 @@ export async function prepareHyperFramesSite(
   try {
     const fps = planFps(options.fps);
     // Parts of the compiler log straight to the console; route them through onLog.
+    // `chunksCarryAudio` is how the plan prepares a mix that goes straight into the output, as
+    // FrameVelo's does: cut to the frame count and held to the official −1 dBTP AAC true peak.
+    // Without it the plan leaves both to an assemble stage FrameVelo does not run.
     const plan = await withConsoleRoutedTo(log, () =>
-      api.distributed.plan(options.projectDir, { fps, width: options.width, height: options.height, format: "mp4", logger }, planDir),
+      api.distributed.plan(
+        options.projectDir,
+        { fps, width: options.width, height: options.height, format: "mp4", logger },
+        planDir,
+        { chunksCarryAudio: true },
+      ),
     );
     const compiledDir = path.join(planDir, "compiled");
     // Serve the extracted video frames from the site itself.

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- HyperFrames: the first frames could show the composition as it was at the last verified moment.
+  Verification seeks quietly out of order, the HyperFrames runtime still runs callbacks at each
+  target, and state written by a GSAP `onUpdate` (a camera driven by several keys on one state
+  object) survived the quiet park before the first frame. Pages that verified now hand their range
+  to fresh pages (about 0.4 s each). Found on a 161 s film whose frames 1–11 showed the camera of
+  14 s; regression test `HyperFrames: verification leaves no callback state behind`.
+- HyperFrames: the audio mix is held to −1 dBTP like `hyperframes render`. The plan only applies the
+  official true-peak step with `chunksCarryAudio`, which FrameVelo now passes; before, a hot mix came
+  out about 4 dB louder than the official render and peaked at +0.9 dBTP.
+
 ## 0.3.0
 
 ### For coding agents

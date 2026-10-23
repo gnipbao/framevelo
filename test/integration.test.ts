@@ -1,7 +1,7 @@
 // End-to-end renders through real Chrome and FFmpeg. Enabled with FRAMEVELO_INTEGRATION=1.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { cp, mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -11,6 +11,7 @@ import { render } from "../src/render.ts";
 
 const enabled = process.env.FRAMEVELO_INTEGRATION === "1";
 const examples = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "examples");
+const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
 describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=1" }, () => {
   let dir: string;
@@ -102,6 +103,31 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     );
     const psnr = Number(/average:([\d.]+)/.exec(stderr)?.[1]);
     assert.ok(psnr > 0 && psnr < 20, `the video region should change once the b-roll is injected (PSNR ${psnr} dB)`);
+  });
+
+  test("HyperFrames: verification leaves no callback state behind; the mix is held to −1 dBTP", async () => {
+    const project = path.join(dir, "hyperframes-callbacks");
+    await cp(path.join(fixtures, "hyperframes-callbacks"), project, { recursive: true });
+    const tone = "0.99*sin(2*PI*997*t)";
+    execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `aevalsrc=${tone}|${tone}:s=48000:d=6`, path.join(project, "tone.wav")]);
+    // Six seconds verify samples up to 5 s, after both keys of the box's move have run; the first
+    // second alone verifies nothing past 0.5 s. Their first 30 frames must match.
+    const long = path.join(dir, "callbacks-long.mp4");
+    const short = path.join(dir, "callbacks-short.mp4");
+    const result = await render({ input: project, output: long, capture: "auto", workers: 1 });
+    assert.equal(result.pipeline, "hyperframes");
+    assert.equal(result.frames, 180);
+    await render({ input: project, output: short, capture: "auto", frames: 30, workers: 1 });
+    const { stderr } = spawnSync(
+      "ffmpeg",
+      ["-hide_banner", "-i", long, "-i", short, "-lavfi", "[0:v]trim=end_frame=30[a];[1:v]trim=end_frame=30[b];[a][b]psnr", "-f", "null", "-"],
+      { encoding: "utf8" },
+    );
+    const psnr = Number(/average:([\d.]+|inf)/.exec(stderr)?.[1]?.replace("inf", "100"));
+    assert.ok(psnr > 40, `the first second matches whatever was verified later (PSNR ${psnr} dB)`);
+    const loudness = spawnSync("ffmpeg", ["-hide_banner", "-nostats", "-i", long, "-af", "ebur128=peak=true", "-f", "null", "-"], { encoding: "utf8" }).stderr;
+    const truePeak = Number(/True peak:\s*\n\s*Peak:\s*(-?[\d.]+)/.exec(loudness)?.[1]);
+    assert.ok(truePeak <= -1, `the AAC track's true peak is held to -1 dBTP (${truePeak} dBTP)`);
   });
 
   test("plain page <video data-start> is frame-exact on the composition clock", async () => {
