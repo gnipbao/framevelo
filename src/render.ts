@@ -83,6 +83,8 @@ export interface RenderOptions {
   ffmpegPath?: string;
   ffprobePath?: string;
   readyTimeoutMs?: number;
+  /** Aborting closes the browser and rejects with the signal's reason; no output is left behind. */
+  signal?: AbortSignal;
   onProgress?: (framesDone: number, framesTotal: number) => void;
   onLog?: (message: string) => void;
 }
@@ -227,6 +229,8 @@ export function fpsFromHtml(html: string): number | undefined {
 export async function render(options: RenderOptions): Promise<RenderResult> {
   const t0 = performance.now();
   const log = options.onLog ?? (() => {});
+  const { signal } = options;
+  signal?.throwIfAborted();
   const codec: Codec = options.codec ?? "h264";
   const { root, file } = await resolveInput(options.input);
   const html = await readFile(file, "utf8");
@@ -235,7 +239,9 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
 
   const chromePath = findChrome(options.chromePath ? { explicitPath: options.chromePath } : {});
   if (!chromePath) {
-    throw new Error("Chrome not found. Install Google Chrome, or pass --chrome / set FRAMEVELO_CHROME to a Chrome 151+ binary.");
+    throw new Error(
+      "Chrome not found. Run `framevelo browser install`, install Google Chrome, or pass --chrome / set FRAMEVELO_CHROME to a Chrome 151+ binary.",
+    );
   }
 
   let site: HyperFramesSite | undefined;
@@ -245,6 +251,9 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
   // Chrome starts while the project compiles; neither needs the other.
   const browserLaunch = launchChrome(chromePath);
   browserLaunch.catch(() => {});
+  // Closing the browser makes whatever the render is waiting on fail fast.
+  const abort = () => void browserLaunch.then((b) => b.close()).catch(() => {});
+  signal?.addEventListener("abort", abort, { once: true });
   let compileMs = 0;
   try {
     let url: string;
@@ -285,6 +294,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     }
 
     compileMs = performance.now() - c0;
+    signal?.throwIfAborted();
     const p0 = performance.now();
     browser = await browserLaunch;
     const version = await browser.version();
@@ -425,7 +435,10 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       workers: result.workers,
       page: result.page,
     };
+  } catch (error) {
+    throw signal?.aborted ? signal.reason : error;
   } finally {
+    signal?.removeEventListener("abort", abort);
     browser ??= await browserLaunch.catch(() => undefined);
     await browser?.close().catch(() => {});
     await server?.close();

@@ -4,6 +4,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { findChrome, installHeadlessShell } from "./chrome.ts";
 import { runDoctor } from "./doctor.ts";
+import { serveMcp } from "./mcp.ts";
 import { parseBitrate, type Codec, type Quality } from "./options.ts";
 import type { CapturePolicy } from "./capture.ts";
 import type { CaptureMode } from "./page-runtime.ts";
@@ -17,6 +18,8 @@ Usage:
   framevelo browser install [version]  Install chrome-headless-shell (default: stable) into the
                                        FrameVelo cache; about half the CPU and memory of full Chrome
   framevelo browser path               Print the Chrome binary FrameVelo would use
+  framevelo mcp                        Serve the render, doctor and install_browser tools to coding
+                                       agents over the Model Context Protocol (stdio)
   framevelo --version
 
 Inputs: a HyperFrames project (compiled with @hyperframes/producer when installed), a code-video
@@ -245,10 +248,15 @@ async function main(argv: string[]): Promise<void> {
   if (command === "render") return renderCommand(rest);
   if (command === "doctor") return doctorCommand(rest);
   if (command === "browser") return browserCommand(rest);
+  if (command === "mcp") return serveMcp(version());
   throw new Error(`Unknown command "${command}". Run framevelo --help.`);
 }
 
-main(process.argv.slice(2)).catch((error: unknown) => {
-  process.stderr.write(`framevelo: ${error instanceof Error ? error.message : String(error)}\n`);
+const argv = process.argv.slice(2);
+main(argv).catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`framevelo: ${message}\n`);
+  // --json callers parse stdout: give them the failure there too.
+  if (argv.includes("--json")) process.stdout.write(`${JSON.stringify({ error: message })}\n`);
   process.exitCode = 1;
 });

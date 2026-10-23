@@ -116,6 +116,41 @@ framevelo render examples/canvas-particles -o particles.mp4 --codec hevc --subfr
 
 The input is an `.html` file or a directory with `index.html`.
 
+## Use with AI agents
+
+FrameVelo has an MCP server, `framevelo mcp`, with three tools: `render`, `doctor` and `install_browser`. It also ships a [skill](plugin/skills/framevelo/SKILL.md) that teaches an agent the workflow: preview a slice, render, check the result, and fix each kind of failure.
+
+**Claude Code**: the plugin installs both.
+
+```
+/plugin marketplace add gnipbao/framevelo
+/plugin install framevelo@framevelo
+```
+
+**Other MCP clients** (Codex, Cursor, Claude Desktop, ...): install once, then register `framevelo mcp`.
+
+```bash
+npm install -g github:gnipbao/framevelo @hyperframes/producer@0.8.186 @hyperframes/engine@0.8.186
+```
+
+```json
+{ "mcpServers": { "framevelo": { "command": "framevelo", "args": ["mcp"] } } }
+```
+
+For Codex, in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.framevelo]
+command = "framevelo"
+args = ["mcp"]
+```
+
+To run it without installing, use `"command": "npx"` with `"args": ["-y", "-p", "github:gnipbao/framevelo", "-p", "@hyperframes/producer@0.8.186", "-p", "@hyperframes/engine@0.8.186", "framevelo", "mcp"]` and the environment `PUPPETEER_SKIP_DOWNLOAD=true`. The first start takes about half a minute, which can exceed a client's startup timeout.
+
+`render` takes the CLI options as JSON (`input`, `output`, `frames`, `start`, `quality`, `scale`, `codec`, ...). It returns `output`, `frames`, `fps`, `width`, `height`, `bytes`, `audio`, `wallMs`, `stages`, `warnings` and the last log lines. While it renders, it sends progress notifications and can be cancelled. Failures come back as readable tool errors, and renders run one at a time.
+
+**Shell-only agents**: `framevelo render <input> -o out.mp4 --json -q` prints the result as JSON on stdout. On failure it prints `{"error": "..."}` and exits with 1.
+
 ## What it renders
 
 ### HyperFrames projects
@@ -169,6 +204,7 @@ Details and the ideas that were measured and dropped: [docs/architecture.md](doc
 framevelo render <input> [options]
 framevelo doctor
 framevelo browser install [version] | framevelo browser path
+framevelo mcp
 ```
 
 | Option | Default | Meaning |
@@ -205,6 +241,8 @@ import { render } from "framevelo";
 const result = await render({ input: "examples/dom-cards", output: "dom-cards.mp4", scale: 2 });
 console.log(result.wallMs, result.stages, result.plan);
 ```
+
+`onProgress(done, total)` reports frames, and an `AbortSignal` passed as `signal` stops a render without leaving a file.
 
 ## Limitations
 

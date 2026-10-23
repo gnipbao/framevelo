@@ -114,6 +114,41 @@ framevelo render examples/canvas-particles -o particles.mp4 --codec hevc --subfr
 
 输入是一个 `.html` 文件，或者一个包含 `index.html` 的目录。
 
+## 接入 AI Agent
+
+FrameVelo 自带 MCP 服务 `framevelo mcp`，提供三个工具：`render`、`doctor` 和 `install_browser`。另附一个 [skill](plugin/skills/framevelo/SKILL.md)，教 Agent 完整流程：先预览一小段、再完整渲染、检查结果，以及每类错误怎么处理。
+
+**Claude Code**：装插件即可同时得到 MCP 工具和 skill。
+
+```
+/plugin marketplace add gnipbao/framevelo
+/plugin install framevelo@framevelo
+```
+
+**其他 MCP 客户端**（Codex、Cursor、Claude Desktop 等）：先安装一次，再注册 `framevelo mcp`。
+
+```bash
+npm install -g github:gnipbao/framevelo @hyperframes/producer@0.8.186 @hyperframes/engine@0.8.186
+```
+
+```json
+{ "mcpServers": { "framevelo": { "command": "framevelo", "args": ["mcp"] } } }
+```
+
+Codex 写在 `~/.codex/config.toml`：
+
+```toml
+[mcp_servers.framevelo]
+command = "framevelo"
+args = ["mcp"]
+```
+
+不想安装也可以用 npx：`"command": "npx"`，`"args": ["-y", "-p", "github:gnipbao/framevelo", "-p", "@hyperframes/producer@0.8.186", "-p", "@hyperframes/engine@0.8.186", "framevelo", "mcp"]`，并设置环境变量 `PUPPETEER_SKIP_DOWNLOAD=true`。首次启动约半分钟，可能超过客户端的启动超时。
+
+`render` 接收与命令行相同的参数，写成 JSON（`input`、`output`、`frames`、`start`、`quality`、`scale`、`codec` 等）。它返回 `output`、`frames`、`fps`、`width`、`height`、`bytes`、`audio`、`wallMs`、`stages`、`warnings` 和最后几行日志。渲染过程中会发送进度通知，也可以取消。失败会以可读的工具错误返回，渲染任务一次只跑一个。
+
+**只能用 shell 的 Agent**：`framevelo render <input> -o out.mp4 --json -q` 在 stdout 输出 JSON 结果；失败时输出 `{"error": "..."}` 并以 1 退出。
+
 ## 能渲染什么
 
 ### HyperFrames 项目
@@ -167,6 +202,7 @@ framevelo render examples/canvas-particles -o particles.mp4 --codec hevc --subfr
 framevelo render <input> [options]
 framevelo doctor
 framevelo browser install [version] | framevelo browser path
+framevelo mcp
 ```
 
 | 选项 | 默认值 | 说明 |
@@ -203,6 +239,8 @@ import { render } from "framevelo";
 const result = await render({ input: "examples/dom-cards", output: "dom-cards.mp4", scale: 2 });
 console.log(result.wallMs, result.stages, result.plan);
 ```
+
+`onProgress(done, total)` 报告帧进度；传入 `signal`（`AbortSignal`）可以中止渲染，不留下文件。
 
 ## 已知限制
 

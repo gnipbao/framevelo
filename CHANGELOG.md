@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0
+
+### For coding agents
+
+- `framevelo mcp`: an MCP server on stdio with `render`, `doctor` and `install_browser` tools.
+  `render` sends progress notifications, can be cancelled, runs renders one at a time and returns a
+  short summary (output, frames, size, timings, warnings, last log lines); failures come back as
+  readable tool errors.
+- Claude Code plugin (`/plugin marketplace add gnipbao/framevelo`): the MCP server plus a skill with
+  the render workflow, the page contract and what to do with each error. The launcher uses an
+  installed `framevelo` and falls back to `npx` from GitHub.
+- `--json` failures print `{"error": ...}` on stdout as well as the message on stderr.
+- `AGENTS.md` for agents working on the repository.
+
+### API
+
+- `render({ signal })`: aborting closes the browser and leaves no output file.
+
 ## 0.2.0
 
 ### HyperFrames projects (M1)
