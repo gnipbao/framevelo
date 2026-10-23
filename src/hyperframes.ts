@@ -13,6 +13,13 @@ import os from "node:os";
 import path from "node:path";
 import type { Page } from "puppeteer-core";
 
+/**
+ * Asks @hyperframes/shader-transitions to render transitions in the page (a WebGL overlay) instead
+ * of leaving the blend to the official Node-side layered pipeline, which FrameVelo does not run.
+ * Pages without shader transitions ignore it.
+ */
+export const PAGE_SIDE_COMPOSITING_FLAG = "window.__HF_PAGE_SIDE_COMPOSITING__ = true;";
+
 /** Frame rates the HyperFrames planner accepts. */
 export const HYPERFRAMES_PLAN_FPS = [24, 25, 30, 60] as const;
 

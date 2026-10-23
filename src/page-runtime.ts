@@ -41,6 +41,8 @@ export interface PageEncodeOptions {
   keyframeInterval: number;
   /** Sub-frames averaged into each output frame (motion blur). */
   subframes: number;
+  /** Skip the paint of a frame in which nothing visible can have changed (DOM capture). */
+  reusePaints?: boolean;
   hardwareAcceleration: "prefer-hardware" | "no-preference" | "prefer-software";
   maxEncodeQueue: number;
   chunkBytes: number;
@@ -56,13 +58,26 @@ export interface PageRenderStats {
   paintMs: number;
   encodeWaitMs: number;
   transferWaitMs: number;
+  /** Sub-frames whose paint was skipped because nothing changed since the previous one. */
+  reusedPaints: number;
+  /** Encoded chunks the encoder returned (one per frame unless it dropped some). */
+  chunks: number;
+  /** Chunks with no payload (the encoder skipped an unchanged frame). */
+  emptyChunks: number;
+  /** Why paint reuse is off for this page, when it is. */
+  reuseDisabledReason?: string;
 }
 
 /** The page-side API installed by `pageInstallRuntime`, reached as `window.__fv`. */
 export interface FrameVeloPageApi {
   prepare(options: PagePrepareOptions): Promise<PagePrepareResult>;
   begin(options: PageEncodeOptions): Promise<{ hardwareFallback: boolean }>;
-  seek(t: number): Promise<void>;
+  /**
+   * Move the composition to `t`. A quiet seek is administrative (verification, sub-frame samples,
+   * repositioning): it must not fire timeline callbacks, so a render's side effects happen once,
+   * in frame order.
+   */
+  seek(t: number, quiet?: boolean): Promise<void>;
   /** Paint the current state as sub-frame `k`; with `encodeFrame`, also encode the finished frame. */
   sample(k: number, encodeFrame?: number): Promise<void>;
   /** Use a native screenshot (base64 JPEG/PNG) as sub-frame `k`; with `encodeFrame`, also encode. */
@@ -86,6 +101,11 @@ export interface FrameVeloPageApi {
   compareScreenshot(base64: string): Promise<number>;
   /** PNG data URL of the last drawElementImage paint (debugging verification). */
   captureDataUrl(): string;
+  /**
+   * Run a pending HyperFrames page-side shader composite (after video frames are injected, before
+   * a screenshot): clone the scenes, paint the clones, run the shader into the overlay canvas.
+   */
+  composite(): Promise<void>;
 }
 
 /**
@@ -137,6 +157,9 @@ export function pageInstallRuntime(): void {
     __framevelo?: { seek?: Seek; duration?: number; fps?: number };
     __hf?: { seek?: (t: number) => unknown; duration?: number; buildReady?: Record<string, unknown> };
     __hfWaitForSeekCompletion?: () => Promise<void>;
+    __hf_page_composite_pending?: boolean;
+    __hf_page_composite_prepare?: () => Promise<boolean>;
+    __hf_page_composite_resolve?: () => boolean;
     __seek?: Seek;
     __duration?: number;
     __timelines?: Record<string, Timeline | undefined>;
@@ -160,7 +183,7 @@ export function pageInstallRuntime(): void {
 
   interface State {
     driver: TimeDriver;
-    seek: (t: number) => Promise<void>;
+    seek: (t: number, quiet: boolean) => Promise<void>;
     mode: "canvas" | "dom";
     target: Element;
     cssWidth: number;
@@ -170,6 +193,13 @@ export function pageInstallRuntime(): void {
     accelerated: HTMLCanvasElement[];
     background: string;
     route: "dom" | "screenshot";
+    /** Mutations inside the captured element since the last paint. */
+    dirty: boolean;
+    /** The next paint must not be skipped (route switch, first frame). */
+    forcePaint: boolean;
+    /** Animation clock signature at the last paint. */
+    animationSignature: string;
+    reuseBlocker: string | null;
   }
   let state: State | null = null;
 
@@ -191,7 +221,7 @@ export function pageInstallRuntime(): void {
     inFlight: number;
     chain: Promise<void>;
     frames: number;
-    stats: { seekMs: number; paintMs: number; encodeWaitMs: number; transferWaitMs: number };
+    stats: { seekMs: number; paintMs: number; encodeWaitMs: number; transferWaitMs: number; reusedPaints: number; chunks: number; emptyChunks: number };
   }
   let session: Session | null = null;
 
@@ -205,7 +235,7 @@ export function pageInstallRuntime(): void {
     const warnings: string[] = [];
     const maxPolls = Math.max(1, Math.ceil(options.readyTimeoutMs / 50));
 
-    type Found = { driver: TimeDriver; seek: (t: number) => Promise<void>; duration?: number; fps?: number };
+    type Found = { driver: TimeDriver; seek: (t: number, quiet: boolean) => Promise<void>; duration?: number; fps?: number };
     const findDriver = (): Found | null => {
       const fv = w.__framevelo;
       if (fv && typeof fv.seek === "function") {
@@ -214,11 +244,12 @@ export function pageInstallRuntime(): void {
       }
       const hf = w.__hf;
       if (hf && typeof hf.seek === "function" && Number(hf.duration) > 0) {
-        const hfSeek = hf.seek.bind(hf);
         return {
           driver: "hyperframes",
-          seek: async (t) => {
-            await settle(hfSeek(t));
+          // Look seek up on every call: libraries such as shader transitions wrap it after load.
+          seek: async (t, quiet) => {
+            const current = w.__hf!.seek as (t: number, options?: { suppressEvents?: boolean }) => unknown;
+            await settle(quiet ? current.call(w.__hf, t, { suppressEvents: true }) : current.call(w.__hf, t));
             await w.__hfWaitForSeekCompletion?.();
           },
           duration: Number(hf.duration),
@@ -234,9 +265,10 @@ export function pageInstallRuntime(): void {
         const keys = Object.keys(timelines);
         const tl = timelines.main ?? (keys[0] !== undefined ? timelines[keys[0]] : undefined);
         if (tl && typeof tl.seek === "function") {
-          // seek() returns the timeline itself, a thenable: never await it.
-          const seek = async (t: number) => {
-            tl.seek(t, false);
+          // seek() returns the timeline itself, a thenable: never await it. Its second argument
+          // is GSAP's suppressEvents.
+          const seek = async (t: number, quiet: boolean) => {
+            tl.seek(t, quiet);
           };
           return { driver: "gsap", seek, duration: typeof tl.duration === "function" ? tl.duration() : undefined };
         }
@@ -372,7 +404,22 @@ export function pageInstallRuntime(): void {
       accelerated,
       background,
       route: mode === "dom" && !capture ? "screenshot" : "dom",
+      dirty: true,
+      forcePaint: true,
+      animationSignature: "",
+      reuseBlocker: null,
     };
+    const st = state;
+    // Content that changes without DOM mutations makes paint reuse unsafe.
+    const blocker = target.querySelector("canvas, iframe, object, embed, animate, animateTransform, animateMotion, set")
+      ? "canvas, iframe or SMIL content"
+      : null;
+    st.reuseBlocker = blocker;
+    if (!blocker) {
+      new MutationObserver(() => {
+        st.dirty = true;
+      }).observe(target, { subtree: true, attributes: true, childList: true, characterData: true });
+    }
     return {
       driver: found.driver,
       mode,
@@ -426,12 +473,71 @@ export function pageInstallRuntime(): void {
     ctx.drawElementImage(st.target, 0, 0);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     drawAccelerated(true);
+    // A HyperFrames shader transition renders the whole frame into a fixed overlay above the page.
+    const overlay = shaderOverlay();
+    if (overlay) ctx.drawImage(overlay, 0, 0, o.width, o.height);
   }
 
-  function paint(s: Session, st: State): Promise<void> {
-    if (st.mode !== "dom") return Promise.resolve();
+  const OVERLAY_ID = "__hf-page-side-compositor";
+  /** The HyperFrames page-side shader overlay, when it is showing a transition frame. */
+  function shaderOverlay(): HTMLCanvasElement | null {
+    const overlay = document.getElementById(OVERLAY_ID);
+    return overlay instanceof HTMLCanvasElement && overlay.style.display !== "none" ? overlay : null;
+  }
+
+  async function composite(): Promise<void> {
+    if (!w.__hf_page_composite_pending) return;
+    if (!(await w.__hf_page_composite_prepare?.())) return;
+    // The shader reads the staged scene clones with drawElementImage: paint them first.
+    const staging = Array.from(document.querySelectorAll<HTMLCanvasElement>("canvas[layoutsubtree]")).filter(
+      (canvas) => canvas !== state?.capture && canvas.id !== OVERLAY_ID,
+    );
+    await Promise.all(
+      staging.map(
+        (canvas) =>
+          new Promise<void>((resolve) => {
+            const timer = clock.setTimeout(resolve, 2000);
+            canvas.addEventListener(
+              "paint",
+              () => {
+                clock.clearTimeout(timer);
+                resolve();
+              },
+              { once: true },
+            );
+            (canvas as HTMLCanvasElement & { requestPaint?: () => void }).requestPaint?.();
+          }),
+      ),
+    );
+    w.__hf_page_composite_resolve?.();
+  }
+
+  /** Clock state of every animation inside the captured element. */
+  function animationSignature(st: State): string {
+    const parts: string[] = [];
+    for (const animation of document.getAnimations()) {
+      const target = (animation.effect as KeyframeEffect | null)?.target;
+      if (target && st.target.contains(target)) parts.push(`${animation.playState}:${animation.currentTime}`);
+    }
+    return parts.join("|");
+  }
+
+  async function paint(s: Session, st: State): Promise<void> {
+    if (st.mode !== "dom") return;
+    await composite();
+    // A shader transition changes the picture outside the observed element.
+    if (shaderOverlay()) st.forcePaint = true;
+    if (s.o.reusePaints && !st.reuseBlocker && !st.forcePaint && !st.dirty) {
+      const signature = animationSignature(st);
+      // An image still loading will change the picture without another mutation.
+      const loading = Array.from(st.target.querySelectorAll("img")).some((img) => !img.complete);
+      if (!loading && signature === st.animationSignature) {
+        s.stats.reusedPaints++;
+        return;
+      }
+    }
     const capture = st.capture as HTMLCanvasElement & { onpaint: (() => void) | null; requestPaint(): void };
-    return new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const timer = clock.setTimeout(() => reject(new Error(`No paint event within ${s.o.paintTimeoutMs} ms.`)), s.o.paintTimeoutMs);
       capture.onpaint = () => {
         clock.clearTimeout(timer);
@@ -439,6 +545,10 @@ export function pageInstallRuntime(): void {
           const p0 = clock.now();
           drawDom(s, st);
           s.stats.paintMs += clock.now() - p0;
+          // Mutations made by drawing itself (none expected) must not count for the next frame.
+          st.dirty = false;
+          st.forcePaint = false;
+          st.animationSignature = s.o.reusePaints && !st.reuseBlocker ? animationSignature(st) : "";
           resolve();
         } catch (error) {
           reject(error);
@@ -513,11 +623,13 @@ export function pageInstallRuntime(): void {
       inFlight: 0,
       chain: Promise.resolve(),
       frames: 0,
-      stats: { seekMs: 0, paintMs: 0, encodeWaitMs: 0, transferWaitMs: 0 },
+      stats: { seekMs: 0, paintMs: 0, encodeWaitMs: 0, transferWaitMs: 0, reusedPaints: 0, chunks: 0, emptyChunks: 0 },
     } as unknown as Session;
 
     s.encoder = new VideoEncoder({
       output: (chunk) => {
+        s.stats.chunks++;
+        if (chunk.byteLength === 0) s.stats.emptyChunks++;
         const bytes = new Uint8Array(chunk.byteLength);
         chunk.copyTo(bytes);
         s.pending.push(bytes);
@@ -554,10 +666,10 @@ export function pageInstallRuntime(): void {
     return { hardwareFallback: s.hardwareFallback };
   }
 
-  async function seek(t: number): Promise<void> {
+  async function seek(t: number, quiet = false): Promise<void> {
     const { s, st } = requireSession();
     const s0 = clock.now();
-    await st.seek(Math.max(0, t));
+    await st.seek(Math.max(0, t), quiet);
     s.stats.seekMs += clock.now() - s0;
   }
 
@@ -642,6 +754,8 @@ export function pageInstallRuntime(): void {
       for (const canvas of st.accelerated) canvas.style.visibility = "hidden";
     }
     st.route = route;
+    // The capture canvas loses its content when the composition leaves it.
+    st.forcePaint = true;
   }
 
   function targetRect(): { x: number; y: number; width: number; height: number } {
@@ -710,13 +824,18 @@ export function pageInstallRuntime(): void {
 
   async function run(startFrame: number, count: number, subframeOffsets: number[]): Promise<void> {
     const { s } = requireSession();
+    const blurred = subframeOffsets.length > 1;
     for (let i = 0; i < count; i++) {
       const frameIndex = startFrame + i;
       const t = frameIndex / s.o.fps;
+      // The frame-time seek carries the timeline's side effects; sub-frame samples are quiet and
+      // the playhead returns to the frame time, so the next seek crosses exactly (t, t + 1/fps].
+      await seek(t);
       for (let k = 0; k < subframeOffsets.length; k++) {
-        await seek(t + subframeOffsets[k]!);
+        if (blurred) await seek(t + subframeOffsets[k]!, true);
         await sample(k, k === subframeOffsets.length - 1 ? frameIndex : undefined);
       }
+      if (blurred) await seek(t, true);
     }
   }
 
@@ -739,6 +858,10 @@ export function pageInstallRuntime(): void {
       paintMs: Math.round(s.stats.paintMs),
       encodeWaitMs: Math.round(s.stats.encodeWaitMs),
       transferWaitMs: Math.round(s.stats.transferWaitMs),
+      reusedPaints: s.stats.reusedPaints,
+      chunks: s.stats.chunks,
+      emptyChunks: s.stats.emptyChunks,
+      ...(state?.reuseBlocker && s.o.reusePaints ? { reuseDisabledReason: state.reuseBlocker } : {}),
     };
   }
 
@@ -756,6 +879,7 @@ export function pageInstallRuntime(): void {
     boundaries,
     paintOnly,
     compareScreenshot,
+    composite,
     captureDataUrl: () => {
       if (!verifyCopy) return "";
       const c = document.createElement("canvas");

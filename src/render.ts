@@ -3,8 +3,8 @@ import path from "node:path";
 import type { Browser } from "puppeteer-core";
 import { captureToFile, openCapturePage, preparePage, type CapturePage, type CapturePolicy } from "./capture.ts";
 import { chromeMajor, findChrome, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
-import { isHyperFramesHtml, loadHyperFrames, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
-import { defaultBitrate, evenDimension, frameCount, subframeOffsets, type Codec } from "./options.ts";
+import { isHyperFramesHtml, loadHyperFrames, PAGE_SIDE_COMPOSITING_FLAG, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
+import { defaultBitrate, evenDimension, frameCount, subframeOffsets, type Codec, type Quality } from "./options.ts";
 import type { CaptureMode, PagePrepareResult, PageRenderStats, TimeDriver } from "./page-runtime.ts";
 import type { IntervalPlan } from "./planner.ts";
 import { serveDirectory, type StaticServer } from "./server.ts";
@@ -34,9 +34,13 @@ export interface RenderOptions {
   capture?: CapturePolicy;
   /** Verification PSNR below which an interval falls back to screenshot capture (default 30 dB). */
   verifyThresholdDb?: number;
+  /** Reuse the previous paint when a seek changed nothing in the composition (default true). */
+  reusePaints?: boolean;
   codec?: Codec;
-  /** Bits per second. */
+  /** Bits per second; overrides `quality`. */
   bitrate?: number;
+  /** Bitrate preset when no bitrate is given (default "standard"). */
+  quality?: Quality;
   /** Audio file to mux. For HyperFrames projects it replaces the composition's own mix. */
   audio?: string;
   subframes?: number;
@@ -157,7 +161,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
         width: viewport.width,
         height: viewport.height,
         fps,
-        preHeadScripts: [VIRTUAL_TIME_SHIM],
+        preHeadScripts: [VIRTUAL_TIME_SHIM, PAGE_SIDE_COMPOSITING_FLAG],
         onLog: log,
       });
       if (site.videos && site.planFps !== fps) {
@@ -198,7 +202,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     const baseHeight = prepared.mode === "canvas" ? (prepared.canvasHeight ?? prepared.cssHeight) : prepared.cssHeight;
     const width = evenDimension(options.width ?? baseWidth * scale);
     const height = evenDimension(options.height ?? baseHeight * scale);
-    const bitrate = options.bitrate ?? defaultBitrate(width, height, fps, codec);
+    const bitrate = options.bitrate ?? defaultBitrate(width, height, fps, codec, options.quality);
     log(`${prepared.mode} capture via ${prepared.driver}: ${frames} frames at ${fps} fps, ${width}x${height}, ${codec} ${(bitrate / 1e6).toFixed(1)} Mbps`);
     for (const warning of warnings) log(`warning: ${warning}`);
 
@@ -232,6 +236,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       bitrate,
       subframeOffsets: subframeOffsets(options.subframes ?? 1, options.shutter ?? 0.5, fps),
       ...(options.capture ? { capture: options.capture } : {}),
+      ...(options.reusePaints !== undefined ? { reusePaints: options.reusePaints } : {}),
       ...(options.verifyThresholdDb !== undefined ? { verifyThresholdDb: options.verifyThresholdDb } : {}),
       onLog: log,
       ...(options.background ? { background: options.background } : {}),

@@ -2,6 +2,10 @@
 
 export type Codec = "h264" | "hevc";
 
+/** Bitrate presets: draft for previews, standard ≈ x264 CRF 18, high for delivery masters. */
+export type Quality = "draft" | "standard" | "high";
+export const QUALITY_FACTORS: Record<Quality, number> = { draft: 0.5, standard: 1, high: 1.6 };
+
 /** Parse "12M", "800k", "12000000" or "1.5m" into bits per second. */
 export function parseBitrate(value: string): number {
   const match = /^\s*(\d+(?:\.\d+)?)\s*([kKmMgG]?)\s*$/.exec(value);
@@ -17,8 +21,8 @@ export function parseBitrate(value: string): number {
  * quality on motion graphics; 0.2 bits per pixel per frame for H.264 lands at about 12 Mbps for
  * 1080p30 and 50 Mbps for 4K30. HEVC gets about two thirds of that.
  */
-export function defaultBitrate(width: number, height: number, fps: number, codec: Codec): number {
-  const bitsPerPixel = codec === "hevc" ? 0.13 : 0.2;
+export function defaultBitrate(width: number, height: number, fps: number, codec: Codec, quality: Quality = "standard"): number {
+  const bitsPerPixel = (codec === "hevc" ? 0.13 : 0.2) * QUALITY_FACTORS[quality];
   const bits = width * height * fps * bitsPerPixel;
   return Math.round(Math.min(Math.max(bits, 1e6), 150e6) / 1e5) * 1e5;
 }

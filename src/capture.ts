@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Browser, CDPSession, Page } from "puppeteer-core";
 import { buildMuxArgs, detectAacEncoder, probeVideo, startMux, type MuxProcess, type VideoProbe } from "./ffmpeg.ts";
@@ -70,6 +70,8 @@ export interface CaptureJob {
   /** Seconds relative to each frame time; more than one entry averages sub-frames (motion blur). */
   subframeOffsets: number[];
   capture?: CapturePolicy;
+  /** Skip painting frames in which nothing visible changed (default true). */
+  reusePaints?: boolean;
   /** Verification PSNR below which an interval is routed to screenshots (default 30 dB). */
   verifyThresholdDb?: number;
   background?: string;
@@ -150,11 +152,12 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
   const output = path.resolve(job.output);
   const staging = path.join(path.dirname(output), `.${path.basename(output)}.${randomBytes(4).toString("hex")}.partial.mp4`);
   const fv = {
-    seek: (t: number) => page.evaluate((time) => (window as unknown as FvWindow).__fv.seek(time), t),
+    seek: (t: number, quiet = false) => page.evaluate((time, q) => (window as unknown as FvWindow).__fv.seek(time, q), t, quiet),
     setRoute: (route: CaptureRoute) => page.evaluate((r) => (window as unknown as FvWindow).__fv.setRoute(r), route),
   };
   let cdp: CDPSession | undefined;
   const screenshot = async (): Promise<string> => {
+    await page.evaluate(() => (window as unknown as FvWindow).__fv.composite());
     cdp ??= await page.createCDPSession();
     const rect = await page.evaluate(() => (window as unknown as FvWindow).__fv.targetRect());
     const { data } = await cdp.send("Page.captureScreenshot", {
@@ -165,8 +168,9 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     });
     return data;
   };
-  const seekAndHook = async (t: number) => {
-    await fv.seek(t);
+  // Verification seeks are administrative: quiet, so timeline callbacks fire only during the render.
+  const quietSeekAndHook = async (t: number) => {
+    await fv.seek(t, true);
     if (job.beforeSample && (job.needsBeforeSample?.(t) ?? true)) await job.beforeSample(t);
   };
 
@@ -176,14 +180,20 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
       codec: job.codec,
       fps: job.fps,
       output: staging,
-      ...(job.audio ? { audio: path.resolve(job.audio.path), audioOffset: job.audio.offset } : {}),
+      ...(job.audio ? { audio: path.resolve(job.audio.path), audioOffset: job.audio.offset, videoSeconds: job.frames / job.fps } : {}),
       ...(audioEncoder ? { audioEncoder } : {}),
     }),
     job.ffmpegPath,
   );
   try {
     const activeMux = mux;
-    await page.exposeFunction("__fvChunk", (base64: string) => activeMux.write(Buffer.from(base64, "base64")));
+    const streamDump = process.env.FRAMEVELO_DUMP_STREAM;
+    if (streamDump) await writeFile(streamDump, "");
+    await page.exposeFunction("__fvChunk", async (base64: string) => {
+      const bytes = Buffer.from(base64, "base64");
+      if (streamDump) await appendFile(streamDump, bytes);
+      await activeMux.write(bytes);
+    });
     await page.exposeFunction("__fvProgress", (done: number) => job.onProgress?.(done, job.frames));
 
     const encodeOptions: PageEncodeOptions = {
@@ -194,6 +204,7 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
       bitrate: job.bitrate,
       keyframeInterval: keyframeInterval(job.fps),
       subframes: job.subframeOffsets.length,
+      reusePaints: job.reusePaints ?? true,
       hardwareAcceleration: "prefer-hardware",
       maxEncodeQueue: 4,
       chunkBytes: 2 << 20,
@@ -214,11 +225,11 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
         const psnrByFrame = new Map<number, number>();
         for (const frame of new Set(intervals.flatMap(sampleFrames))) {
           const t = frame / job.fps;
-          await seekAndHook(t);
+          await quietSeekAndHook(t);
           await page.evaluate(() => (window as unknown as FvWindow).__fv.paintOnly());
           // Moving the composition out of the capture canvas restarts CSS animations: seek again.
           await fv.setRoute("screenshot");
-          await seekAndHook(t);
+          await quietSeekAndHook(t);
           const shot = await screenshot();
           const psnr = await page.evaluate((b64) => (window as unknown as FvWindow).__fv.compareScreenshot(b64), shot);
           psnrByFrame.set(frame, psnr);
@@ -246,8 +257,12 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     const routeOf = (frame: number): CaptureRoute => routes.find((r) => frame >= r.start && frame < r.end)?.route ?? "dom";
 
     // ---- frame loop ----
+    // Park the playhead just before the first frame without firing callbacks, so the render's own
+    // seeks replay the timeline's side effects in order from the start.
+    await fv.seek(Math.max(0, (job.startFrame - 1) / job.fps), true);
     let screenshotFrames = 0;
     const last = job.subframeOffsets.length - 1;
+    const blurred = last > 0;
     for (const segment of planSegments(job, routeOf)) {
       if (prepared.mode === "dom") await fv.setRoute(segment.route);
       if (!segment.hooked) {
@@ -260,9 +275,11 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
         continue;
       }
       for (let frameIndex = segment.start; frameIndex < segment.start + segment.count; frameIndex++) {
+        const frameTime = frameIndex / job.fps;
+        await fv.seek(frameTime);
         for (let k = 0; k <= last; k++) {
-          const t = Math.max(0, frameIndex / job.fps + job.subframeOffsets[k]!);
-          await fv.seek(t);
+          const t = Math.max(0, frameTime + job.subframeOffsets[k]!);
+          if (blurred) await fv.seek(t, true);
           if (job.beforeSample) await job.beforeSample(t);
           const encodeFrame = k === last ? frameIndex : null;
           if (segment.route === "screenshot") {
@@ -277,6 +294,7 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
             await page.evaluate((sub, frame) => (window as unknown as FvWindow).__fv.sample(sub, frame ?? undefined), k, encodeFrame);
           }
         }
+        if (blurred) await fv.seek(frameTime, true);
         if (segment.route === "screenshot") screenshotFrames++;
       }
     }
@@ -287,7 +305,11 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     mux = undefined;
 
     const probe = await probeVideo(staging, job.ffprobePath);
-    if (probe.packets !== job.frames) throw new Error(`Encoded ${probe.packets} video packets, expected ${job.frames}.`);
+    if (probe.packets !== job.frames) {
+      throw new Error(
+        `Muxed ${probe.packets} video packets from ${pageStats.frames} frames (${pageStats.chunks} encoder chunks, ${pageStats.emptyChunks} empty); expected ${job.frames}.`,
+      );
+    }
     if (probe.width !== job.width || probe.height !== job.height) {
       throw new Error(`Output is ${probe.width}x${probe.height}, expected ${job.width}x${job.height}.`);
     }

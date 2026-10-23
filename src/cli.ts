@@ -4,7 +4,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { findChrome, installHeadlessShell } from "./chrome.ts";
 import { runDoctor } from "./doctor.ts";
-import { parseBitrate, type Codec } from "./options.ts";
+import { parseBitrate, type Codec, type Quality } from "./options.ts";
 import type { CapturePolicy } from "./capture.ts";
 import type { CaptureMode } from "./page-runtime.ts";
 import { render, type RenderOptions } from "./render.ts";
@@ -38,8 +38,10 @@ Render options:
                           fall back per interval), dom (drawElementImage only), screenshot
                           (default: auto)
       --verify-threshold <dB>  Verification PSNR below which an interval uses screenshots (default: 30)
+      --no-paint-reuse    Repaint every frame, even when a seek changed nothing in the composition
       --codec <c>         h264 | hevc (default: h264)
-      --bitrate <b>       Target bitrate, e.g. 12M (default: scales with size and fps)
+      --quality <q>       draft | standard | high: bitrate preset (default: standard, about x264 CRF 18)
+      --bitrate <b>       Target bitrate, e.g. 12M; overrides --quality
       --audio <file>      Audio track to mux (AAC)
       --subframes <n>     Sub-frames averaged per frame for motion blur (default: 1)
       --shutter <f>       Fraction of the frame interval the sub-frames span (default: 0.5)
@@ -94,8 +96,10 @@ async function renderCommand(argv: string[]): Promise<void> {
       selector: { type: "string" },
       capture: { type: "string" },
       "verify-threshold": { type: "string" },
+      "no-paint-reuse": { type: "boolean" },
       codec: { type: "string" },
       bitrate: { type: "string" },
+      quality: { type: "string" },
       audio: { type: "string" },
       subframes: { type: "string" },
       shutter: { type: "string" },
@@ -147,8 +151,10 @@ async function renderCommand(argv: string[]): Promise<void> {
   assign("selector", values.selector);
   assign("capture", oneOf<CapturePolicy>("capture", values.capture, ["auto", "dom", "screenshot"]));
   assign("verifyThresholdDb", numberOption("verify-threshold", values["verify-threshold"]));
+  if (values["no-paint-reuse"]) options.reusePaints = false;
   assign("codec", oneOf<Codec>("codec", values.codec, ["h264", "hevc"]));
   assign("bitrate", values.bitrate === undefined ? undefined : parseBitrate(values.bitrate));
+  assign("quality", oneOf<Quality>("quality", values.quality, ["draft", "standard", "high"]));
   assign("audio", values.audio);
   assign("subframes", numberOption("subframes", values.subframes, (n) => Number.isInteger(n) && n >= 1));
   assign("shutter", numberOption("shutter", values.shutter, (n) => n >= 0 && n <= 1));

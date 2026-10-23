@@ -21,6 +21,12 @@ test("defaultBitrate scales with pixels and frame rate, and HEVC needs less", ()
   assert.equal(defaultBitrate(16, 16, 1, "h264"), 1_000_000, "clamped to a 1 Mbps floor");
 });
 
+test("quality presets scale the default bitrate", () => {
+  assert.equal(defaultBitrate(1920, 1080, 30, "h264", "draft"), 6_200_000);
+  assert.equal(defaultBitrate(1920, 1080, 30, "h264", "standard"), 12_400_000);
+  assert.equal(defaultBitrate(1920, 1080, 30, "h264", "high"), 19_900_000);
+});
+
 test("frameCount treats the duration as whole frame intervals", () => {
   assert.equal(frameCount(10, 30), 300);
   assert.equal(frameCount(0.1 + 0.2, 10), 3, "floating-point noise does not add a frame");

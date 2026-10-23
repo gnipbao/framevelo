@@ -13,6 +13,11 @@ export interface MuxArgsOptions {
   audioOffset?: number;
   /** FFmpeg audio encoder, or "copy" for an audio track that is already AAC. */
   audioEncoder?: string;
+  /**
+   * Length of the video in seconds. Longer audio is cut to it; shorter audio simply ends early.
+   * (-shortest would instead drop trailing video frames when the audio is a hair shorter.)
+   */
+  videoSeconds?: number;
   audioBitrate?: string;
 }
 
@@ -46,7 +51,10 @@ export function buildMuxArgs(options: MuxArgsOptions): string[] {
     codec === "hevc" ? "hevc" : "h264",
     "-i",
     "pipe:0",
+    // Seek and length apply to the audio input only: an output -t counts from the earliest stream
+    // start, so an audio track with encoder priming (negative start) would cut video frames.
     ...(audio && options.audioOffset ? ["-ss", String(options.audioOffset)] : []),
+    ...(audio && options.videoSeconds ? ["-t", options.videoSeconds.toFixed(6)] : []),
     ...(audio ? ["-i", audio] : []),
     "-map",
     "0:v:0",
@@ -58,8 +66,8 @@ export function buildMuxArgs(options: MuxArgsOptions): string[] {
     ...(codec === "hevc" ? ["-tag:v", "hvc1"] : []),
     ...(audio
       ? options.audioEncoder === "copy"
-        ? ["-c:a", "copy", "-shortest"]
-        : ["-c:a", options.audioEncoder ?? "aac", "-b:a", options.audioBitrate ?? "192k", "-shortest"]
+        ? ["-c:a", "copy"]
+        : ["-c:a", options.audioEncoder ?? "aac", "-b:a", options.audioBitrate ?? "192k"]
       : []),
     "-movflags",
     "+faststart",
