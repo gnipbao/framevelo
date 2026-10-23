@@ -19,8 +19,9 @@ Usage:
   framevelo browser path               Print the Chrome binary FrameVelo would use
   framevelo --version
 
-The page must be seekable: window.__framevelo = { seek(t), duration }, window.__seek(t), or a paused
-GSAP timeline on window.__timelines.main (HyperFrames convention).
+Inputs: a HyperFrames project (compiled with @hyperframes/producer when installed), a code-video
+composition (defineComposition), or any page that is seekable through window.__framevelo =
+{ seek(t), duration }, window.__seek(t), or a paused GSAP timeline on window.__timelines.main.
 
 Render options:
   -o, --output <file>     Output .mp4 (default: <input name>.mp4)
@@ -41,6 +42,8 @@ Render options:
       --no-paint-reuse    Repaint every frame, even when a seek changed nothing in the composition
       --no-video-proxy    Plain pages: seek <video data-start> sources as they are instead of cached
                           all-intra proxies (slow for long keyframe intervals)
+      --workers <n>       Pages rendering Node-driven frames (HyperFrames video, screenshots) in
+                          parallel (default: from the CPU count; 1 turns it off)
       --codec <c>         h264 | hevc (default: h264)
       --quality <q>       draft | standard | high: bitrate preset (default: standard, about x264 CRF 18)
       --bitrate <b>       Target bitrate, e.g. 12M; overrides --quality
@@ -102,6 +105,7 @@ async function renderCommand(argv: string[]): Promise<void> {
       "verify-threshold": { type: "string" },
       "no-paint-reuse": { type: "boolean" },
       "no-video-proxy": { type: "boolean" },
+      workers: { type: "string" },
       codec: { type: "string" },
       bitrate: { type: "string" },
       quality: { type: "string" },
@@ -159,6 +163,7 @@ async function renderCommand(argv: string[]): Promise<void> {
   assign("verifyThresholdDb", numberOption("verify-threshold", values["verify-threshold"]));
   if (values["no-paint-reuse"]) options.reusePaints = false;
   if (values["no-video-proxy"]) options.videoProxies = false;
+  assign("workers", numberOption("workers", values.workers, (n) => Number.isInteger(n) && n >= 1 && n <= 16));
   assign("codec", oneOf<Codec>("codec", values.codec, ["h264", "hevc"]));
   assign("bitrate", values.bitrate === undefined ? undefined : parseBitrate(values.bitrate));
   assign("quality", oneOf<Quality>("quality", values.quality, ["draft", "standard", "high"]));

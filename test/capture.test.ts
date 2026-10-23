@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planSegments } from "../src/capture.ts";
+import { planSegments, splitRange } from "../src/capture.ts";
 
 const hook = async () => {};
 
@@ -56,4 +56,17 @@ test("screenshot intervals are always driven from Node and split segments", () =
     { start: 4, count: 3, hooked: true, route: "screenshot" },
     { start: 7, count: 3, hooked: false, route: "dom" },
   ]);
+});
+
+test("splitRange covers the range in contiguous, nearly equal parts", () => {
+  assert.deepEqual(splitRange(10, 100, 3), [
+    { start: 10, frames: 33 },
+    { start: 43, frames: 34 },
+    { start: 77, frames: 33 },
+  ]);
+  assert.deepEqual(splitRange(0, 2, 4), [
+    { start: 0, frames: 1 },
+    { start: 1, frames: 1 },
+  ]);
+  assert.deepEqual(splitRange(5, 7, 1), [{ start: 5, frames: 7 }]);
 });

@@ -104,6 +104,26 @@ peer `@hyperframes/producer` is installed:
 
 Chrome starts while the project compiles.
 
+## Parallel pages
+
+Frames driven from Node (video injection, screenshot intervals) cost a few protocol round trips each
+and leave the GPU mostly idle, so they are latency-bound where in-page loops are GPU-bound. When a
+render has at least 200 such frames per extra page (up to `--workers`, by default a third of the
+cores, at most 4), more pages open on the same composition while the main page starts verifying, and
+take verification samples from a shared queue as they come up. After routing, the range is split into
+contiguous parts, one per page:
+
+- each page parks quietly before the first frame, then seeks normally to the frame before its part,
+  so timeline side effects (GSAP `.call()`) replay as in a sequential render;
+- each page has its own HyperFrames injector and encoder; the encoder first encodes the frame before
+  its part as a discarded warm-up frame (a cold start costs about 2.5 dB on the first keyframe), then
+  starts the part on a keyframe; keyframes otherwise follow the video's own GOP grid;
+- parts are written to temporary Annex-B files and concatenated in order into the muxer.
+
+On the 1516-frame `hf2550-video-subcomposition-ghost` fixture, 3–4 pages cut the render stage from
+38 s to 13–15 s at 7% more CPU and about 40% more peak memory; PSNR against the official render is
+unchanged. Below about 200 Node-driven frames per page the page start-up outweighs the gain.
+
 ## Video on plain pages
 
 `<video data-start>` (optional `data-media-start`, `data-duration`, `data-playback-rate`) is paused and
@@ -117,7 +137,7 @@ range requests, without which Chrome cannot seek in MP4.
 | Idea | Finding |
 |---|---|
 | Custom Chromium build (RenderKit) | Not needed on macOS: the paint loop is not vsync-bound and VideoToolbox is reachable from WebCodecs |
-| Parallel pages or browsers | GPU-bound on M3 Pro; throughput flat, memory grows per browser |
+| Parallel pages for in-page loops, parallel browsers | GPU-bound on M3 Pro; throughput flat, memory grows per page (parallel pages are used only for Node-driven frames) |
 | Full Chrome | Same frames at about twice the CPU and memory of `chrome-headless-shell` |
 | In-page HyperFrames video injection | A swapped `<img>` needs a second rendering update; no faster than the official Node-side injector |
 | Native seeking of HyperFrames videos | Frame-exact but colors follow Chrome rather than the official extraction, remote sources refetch on every seek, 3.5x slower on long-GOP sources |

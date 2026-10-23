@@ -88,11 +88,18 @@ export interface FrameVeloPageApi {
   managedVideoSources(): string[];
   /** Point managed video `index` at another file (an all-intra proxy) and wait for it to load. */
   replaceVideoSource(index: number, url: string): Promise<boolean>;
-  /** Paint the current state as sub-frame `k`; with `encodeFrame`, also encode the finished frame. */
-  sample(k: number, encodeFrame?: number): Promise<void>;
+  /**
+   * Paint the current state as sub-frame `k`; with `encodeFrame`, also encode the finished frame.
+   * `settleFirst` runs one rendering update before the paint (after an <img> swap).
+   */
+  sample(k: number, encodeFrame?: number, settleFirst?: boolean): Promise<void>;
   /** Use a native screenshot (base64 JPEG/PNG) as sub-frame `k`; with `encodeFrame`, also encode. */
   sampleScreenshot(base64: string, k: number, encodeFrame?: number): Promise<void>;
-  encode(frameIndex: number): Promise<void>;
+  /**
+   * Encode the current frame. A `warmup` frame is encoded and its output dropped: it primes the
+   * rate control of an encoder that starts mid-video, before that range's first real frame.
+   */
+  encode(frameIndex: number, warmup?: boolean): Promise<void>;
   /** In-page loop: seek, sample and encode `count` frames starting at `startFrame`. */
   run(startFrame: number, count: number, subframeOffsets: number[]): Promise<void>;
   end(): Promise<PageRenderStats>;
@@ -303,6 +310,8 @@ export function pageInstallRuntime(): void {
     inFlight: number;
     chain: Promise<void>;
     frames: number;
+    /** Timestamps of warm-up frames, whose chunks are dropped. */
+    warmups: Set<number>;
     stats: { seekMs: number; paintMs: number; encodeWaitMs: number; transferWaitMs: number; reusedPaints: number; chunks: number; emptyChunks: number };
   }
   let session: Session | null = null;
@@ -754,11 +763,13 @@ export function pageInstallRuntime(): void {
       inFlight: 0,
       chain: Promise.resolve(),
       frames: 0,
+      warmups: new Set<number>(),
       stats: { seekMs: 0, paintMs: 0, encodeWaitMs: 0, transferWaitMs: 0, reusedPaints: 0, chunks: 0, emptyChunks: 0 },
     } as unknown as Session;
 
     s.encoder = new VideoEncoder({
       output: (chunk) => {
+        if (s.warmups.delete(chunk.timestamp)) return;
         s.stats.chunks++;
         if (chunk.byteLength === 0) s.stats.emptyChunks++;
         const bytes = new Uint8Array(chunk.byteLength);
@@ -820,16 +831,18 @@ export function pageInstallRuntime(): void {
     s.stats.seekMs += clock.now() - s0;
   }
 
-  async function encode(frameIndex: number): Promise<void> {
+  async function encode(frameIndex: number, warmup = false): Promise<void> {
     const { s } = requireSession();
     if (s.encoderError) throw s.encoderError;
     const frameDuration = 1e6 / s.o.fps;
-    const frame = new VideoFrame((s.output ?? s.frameSource) as CanvasImageSource, {
-      timestamp: Math.round(frameIndex * frameDuration),
-      duration: Math.round(frameDuration),
-    });
-    s.encoder.encode(frame, { keyFrame: s.frames % s.o.keyframeInterval === 0 });
+    const timestamp = Math.round(frameIndex * frameDuration);
+    const frame = new VideoFrame((s.output ?? s.frameSource) as CanvasImageSource, { timestamp, duration: Math.round(frameDuration) });
+    if (warmup) s.warmups.add(timestamp);
+    // Keyframes sit on the video's own GOP grid, plus the first frame of a session, so ranges
+    // rendered by separate encoders concatenate.
+    s.encoder.encode(frame, { keyFrame: warmup || s.frames === 0 || frameIndex % s.o.keyframeInterval === 0 });
     frame.close();
+    if (warmup) return;
     s.frames++;
 
     const e0 = clock.now();
@@ -856,9 +869,10 @@ export function pageInstallRuntime(): void {
     }
   }
 
-  async function sample(k: number, encodeFrame?: number): Promise<void> {
+  async function sample(k: number, encodeFrame?: number, settleFirst = false): Promise<void> {
     const { s, st } = requireSession();
     if (st.mode === "dom" && st.route !== "dom") throw new Error("sample() needs the dom route; use sampleScreenshot().");
+    if (settleFirst) await settleRendering();
     await paint(s, st);
     accumulate(s, s.source, k);
     if (encodeFrame !== undefined) await encode(encodeFrame);

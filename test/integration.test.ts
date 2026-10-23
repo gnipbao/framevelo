@@ -65,6 +65,24 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     assert.equal(lastProgress, 20);
   });
 
+  test("Node-driven frames split across worker pages concatenate seamlessly", async () => {
+    const common = { input: path.join(examples, "dom-cards"), capture: "screenshot", fps: 120, frames: 400, width: 640, height: 360 } as const;
+    const single = path.join(dir, "workers-1.mp4");
+    const split = path.join(dir, "workers-2.mp4");
+    assert.equal((await render({ ...common, output: single, workers: 1 })).workers, 1);
+    const result = await render({ ...common, output: split, workers: 2 });
+    assert.equal(result.workers, 2);
+    assert.equal((await probeVideo(split)).packets, 400);
+    const keyframes = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "frame=key_frame", "-of", "csv=p=0", split], { encoding: "utf8" })
+      .trim()
+      .split("\n")
+      .flatMap((flag, i) => (flag.startsWith("1") ? [i] : []));
+    assert.ok(keyframes.includes(200), `the second range starts on a keyframe (keyframes ${keyframes.join(",")})`);
+    const { stderr } = spawnSync("ffmpeg", ["-hide_banner", "-i", split, "-i", single, "-lavfi", "[0:v][1:v]psnr", "-f", "null", "-"], { encoding: "utf8" });
+    const psnr = Number(/average:([\d.]+)/.exec(stderr)?.[1]);
+    assert.ok(psnr > 40, `split and single-page renders match (PSNR ${psnr} dB)`);
+  });
+
   test("HyperFrames project: official compile and runtime, injected video, plan audio", async () => {
     const output = path.join(dir, "hyperframes.mp4");
     // Frames 15..44 (0.5 s to 1.5 s) cross the b-roll's entrance at 1 s.

@@ -3,7 +3,15 @@ import { readFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Browser } from "puppeteer-core";
-import { captureToFile, openCapturePage, preparePage, type CapturePage, type CapturePolicy, type CaptureResult } from "./capture.ts";
+import {
+  captureToFile,
+  openCapturePage,
+  preparePage,
+  type CapturePage,
+  type CapturePolicy,
+  type CaptureResult,
+  type CaptureWorker,
+} from "./capture.ts";
 import { chromeMajor, findChrome, framevelCacheDir, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
 import { ensureProxy } from "./media-proxy.ts";
 import { isHyperFramesHtml, loadHyperFrames, PAGE_SIDE_COMPOSITING_FLAG, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
@@ -65,6 +73,12 @@ export interface RenderOptions {
    * "off" renders it as a plain seekable page.
    */
   hyperframes?: "auto" | "off";
+  /**
+   * Pages that render frames driven from Node (HyperFrames video frames, screenshot capture) in
+   * parallel, each over a contiguous part of the range. Default: chosen from the CPU count; 1 turns
+   * it off. Frames painted inside the page do not use workers.
+   */
+  workers?: number;
   chromePath?: string;
   ffmpegPath?: string;
   ffprobePath?: string;
@@ -100,7 +114,14 @@ export interface RenderResult {
   nodeLoop: CaptureResult["nodeLoop"];
   /** Frames captured through native screenshots instead of drawElementImage. */
   screenshotFrames: number;
+  /** Pages that rendered frames in parallel. */
+  workers: number;
   page: PageRenderStats;
+}
+
+/** Parallel pages for Node-driven frames: latency-bound, so a few pages overlap their round trips. */
+export function defaultWorkers(cpus = os.availableParallelism()): number {
+  return Math.max(1, Math.min(4, Math.floor(cpus / 3)));
 }
 
 export async function resolveInput(input: string): Promise<{ root: string; file: string }> {
@@ -269,13 +290,14 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     const version = await browser.version();
     log(`chrome ${version} (${chromePath})`);
     // Plain pages get a seeded Math.random so renders repeat; HyperFrames keeps the official behavior.
-    const capture: CapturePage = await openCapturePage(browser, url, viewport, { seedRandom: !useHyperFrames });
-    const prepared: PagePrepareResult = await preparePage(capture, {
+    const pageOptions = {
       mode: useHyperFrames ? "dom" : (options.mode ?? "auto"),
       ...(options.selector ? { selector: options.selector } : {}),
       readyTimeoutMs: options.readyTimeoutMs ?? (useHyperFrames ? 45_000 : 10_000),
       ...(useHyperFrames ? { expectHyperFrames: true } : {}),
-    });
+    } as const;
+    const capture: CapturePage = await openCapturePage(browser, url, viewport, { seedRandom: !useHyperFrames });
+    const prepared: PagePrepareResult = await preparePage(capture, pageOptions);
     warnings.push(...prepared.warnings);
     if (prepared.mode === "dom" && prepared.drawElementReady && chromeMajor(version) < MIN_DOM_CHROME_MAJOR) {
       warnings.push(`Chrome ${chromeMajor(version)} predates reliable drawElementImage (${MIN_DOM_CHROME_MAJOR}+); verification decides per interval`);
@@ -301,24 +323,47 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     log(`${prepared.mode} capture via ${prepared.driver}: ${frames} frames at ${fps} fps, ${width}x${height}, ${codec} ${(bitrate / 1e6).toFixed(1)} Mbps`);
     for (const warning of warnings) log(`warning: ${warning}`);
 
-    // The official injector swaps <video> elements for pre-extracted frames after each seek.
-    let beforeSample: ((time: number) => Promise<void>) | undefined;
+    // The official injector swaps <video> elements for pre-extracted frames after each seek. Each
+    // page gets its own injector: it remembers what it injected.
+    let hookFor: ((page: CapturePage["page"]) => (time: number) => Promise<void>) | undefined;
     let needsBeforeSample: ((time: number) => boolean) | undefined;
     const offsets = subframeOffsets(options.subframes ?? 1, options.shutter ?? 0.5, fps);
     if (site?.videos) {
       const api = await loadHyperFrames();
-      const lookup = api.engine.createFrameLookupTable(site.videos.videos, site.videos.extracted, site.planFps);
+      const videos = site.videos;
+      const lookup = api.engine.createFrameLookupTable(videos.videos, videos.extracted, site.planFps);
       const frameUrl = site.frameUrl;
       // Frames load over same-origin HTTP rather than as base64 data URIs through the protocol.
-      const inject = api.producer.createVideoFrameInjector(lookup, { frameSrcResolver: (framePath) => frameUrl(framePath) });
-      if (inject) {
-        beforeSample = (time) => inject(capture.page, time);
+      const injector = () => api.producer.createVideoFrameInjector(lookup, { frameSrcResolver: (framePath) => frameUrl(framePath) });
+      if (injector()) {
+        hookFor = (page) => {
+          const inject = injector()!;
+          return (time) => inject(page, time);
+        };
         // Only frames inside a video's window (one frame of margin) need the round trip.
-        const windows = videoWindows(site.videos.videos);
+        const windows = videoWindows(videos.videos);
         const margin = 1 / fps;
         needsBeforeSample = windows ? (t) => windows.some(([a, b]) => t >= a - margin && t < b + margin) : undefined;
       }
     }
+    const beforeSample = hookFor?.(capture.page);
+    const openWorker = async (): Promise<CaptureWorker> => {
+      const worker = await openCapturePage(browser!, url, viewport, { seedRandom: !useHyperFrames });
+      try {
+        const ready = await preparePage(worker, pageOptions);
+        if (ready.mode !== prepared.mode || ready.cssWidth !== prepared.cssWidth || ready.cssHeight !== prepared.cssHeight) {
+          throw new Error("a worker page prepared differently from the main page");
+        }
+        if (ready.managedVideos > 0 && server && options.videoProxies !== false) {
+          await useVideoProxies(worker, root, server.origin, options, () => {});
+        }
+      } catch (error) {
+        await worker.page.close().catch(() => {});
+        throw error;
+      }
+      const hook = hookFor?.(worker.page);
+      return { page: worker.page, ...(hook ? { beforeSample: hook } : {}), close: () => worker.page.close() };
+    };
 
     let declaredAudio: string | undefined;
     if (!options.audio && !site && prepared.audio && server) {
@@ -347,6 +392,8 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       ...(audioPath ? { audio: { path: audioPath, offset: start, copy: !options.audio && Boolean(site?.audioPath) } } : {}),
       ...(beforeSample ? { beforeSample } : {}),
       ...(needsBeforeSample ? { needsBeforeSample } : {}),
+      workers: options.workers ?? defaultWorkers(),
+      openWorker,
       ...(options.ffmpegPath ? { ffmpegPath: options.ffmpegPath } : {}),
       ...(options.ffprobePath ? { ffprobePath: options.ffprobePath } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
@@ -375,6 +422,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       plan: result.plan,
       nodeLoop: result.nodeLoop,
       screenshotFrames: result.screenshotFrames,
+      workers: result.workers,
       page: result.page,
     };
   } finally {

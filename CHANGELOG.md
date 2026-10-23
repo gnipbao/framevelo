@@ -29,6 +29,12 @@
 - `<video data-start>` on plain pages is kept frame-exact on the composition clock; long-GOP sources
   get cached all-intra proxies encoded on VideoToolbox (`--no-video-proxy` to opt out).
 - Static server supports HTTP byte ranges and mounts.
+- Parallel pages for Node-driven frames (`--workers`): HyperFrames video frames and screenshot
+  intervals are split into contiguous ranges rendered by separate pages and encoders, then
+  concatenated; each range starts on a keyframe after a discarded warm-up frame. Verification
+  samples are shared between the pages. On a 50 s video-heavy fixture the render stage drops from
+  38 s to 13–15 s.
+- Keyframes follow the video's own GOP grid rather than the count of frames since the encoder started.
 
 ### Fixes
 
