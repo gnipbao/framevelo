@@ -1,0 +1,11 @@
+node_modules/
+www/gsap.min.js
+hfproj/gsap.min.js
+*.mp4
+*.mkv
+*.h264
+*.h265
+segs.txt
+frames/
+hfpng/
+t.txt

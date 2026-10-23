@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style></head>
+<body><canvas id="cap" width="1920" height="1080"></canvas>
+<script>
+  // code-video style: the whole film is a pure function of time drawn with Canvas 2D.
+  const c = document.getElementById('cap'), g = c.getContext('2d');
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const P = Array.from({ length: 1500 }, () => ({ x: rnd() * 1920, y: rnd() * 1080, r: 1 + rnd() * 4, v: 20 + rnd() * 80, h: 180 + rnd() * 120 }));
+  window.__seek = (t) => {
+    const bg = g.createLinearGradient(0, 0, 1920, 1080); bg.addColorStop(0, `hsl(${220 + 20 * Math.sin(t)} 50% 12%)`); bg.addColorStop(1, '#05060a');
+    g.fillStyle = bg; g.fillRect(0, 0, 1920, 1080);
+    for (const p of P) { g.fillStyle = `hsla(${p.h} 90% 65% / .8)`; g.beginPath(); g.arc((p.x + p.v * t) % 1920, (p.y + 30 * Math.sin(t + p.x)) % 1080, p.r, 0, 6.283); g.fill(); }
+    for (let i = 0; i < 40; i++) { g.save(); g.translate(960 + 420 * Math.cos(t * 0.6 + i * 0.157), 540 + 300 * Math.sin(t * 0.9 + i * 0.157));
+      g.rotate(t + i); g.shadowColor = 'rgba(0,0,0,.5)'; g.shadowBlur = 20; g.fillStyle = `hsl(${i * 9} 80% 60%)`; g.fillRect(-60, -35, 120, 70); g.restore(); }
+    g.shadowBlur = 0; g.fillStyle = '#fff'; g.font = '800 120px -apple-system, Helvetica'; g.textAlign = 'center';
+    g.fillText('FrameVelo Canvas', 960, 560 + 40 * Math.sin(t * 2)); g.font = '40px -apple-system'; g.fillStyle = '#9fb3ff'; g.fillText(`t = ${t.toFixed(3)}s`, 960, 640);
+  };
+  window.__seek(0);
+</script>
+<script src="capture.js"></script>
+</body></html>

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.log
+.env
+.env.*
+
+# render outputs
+*.mp4
+*.mov
+*.mkv
+*.h264
+*.h265
+out/
+renders/
