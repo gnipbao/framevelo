@@ -17,7 +17,60 @@ seek(t) ─► drawElementImage (DOM) / canvas ─► VideoFrame ─► WebCodec
         ─► compressed H.264/HEVC ─► stream-copy mux + audio ─► verified MP4
 ```
 
-<!-- results -->
+## Results
+
+Apple M3 Pro (11 cores, 18 GB), macOS 27, chrome-headless-shell 154, FFmpeg 7.0.2, HyperFrames 0.8.186. Wall time, CPU time and peak memory cover the whole process tree, sampled every 200 ms; quality is per-frame PSNR against the reference render.
+
+**GSAP composition, 10 s** ([research/bench/hfproj](research/bench/hfproj))
+
+| Renderer | Wall | CPU | Peak memory | PSNR vs official |
+|---|---:|---:|---:|---:|
+| `hyperframes render`, 1080p | 17.4 s | 64.2 s | 2385 MB | |
+| `hyperframes render --gpu`, 1080p | 15.4 s | 30.6 s | 2035 MB | |
+| **FrameVelo, 1080p** | **7.8 s** | **7.8 s** | **797 MB** | 45.6 dB |
+| `hyperframes render`, 4K | 34.7 s | 210.5 s | 3360 MB | |
+| `hyperframes render --gpu`, 4K | 32.8 s | 91.2 s | 2489 MB | |
+| **FrameVelo, 4K** | **9.3 s** | **11.5 s** | **903 MB** | 48.7 dB |
+
+FrameVelo's files are larger (15.5 MB against 14.3 MB at 1080p, 56 MB against 37 MB at 4K): the hardware encoder needs more bits than x264 for the same quality.
+
+**HyperFrames regression fixtures**: the 24 projects from the official `packages/producer/tests` render, 23 of them at 40 dB or more against `hyperframes render` (a page-side shader transition fixture averages 37.5 dB). In total, wall time drops from 366 s to 219 s (1.7× faster), CPU from 589 s to 265 s (2.2× less) and mean peak memory from 1858 MB to 926 MB (50% less). Motion graphics gain the most, 2.5–6×. Video-heavy fixtures gain less because their frames come from the official extraction and injector; `pip-video-late-host` is 5% slower.
+
+<details>
+<summary>Per fixture</summary>
+
+| Fixture | Frames | PSNR avg / min | Wall HF → FV | CPU HF → FV | Peak memory HF → FV |
+|---|---:|---:|---:|---:|---:|
+| nested-subcomp-depth-3 | 60 | 49.7 / 49.3 dB | 13.0 → 3.3 s | 6.3 → 1.9 s | 1306 → 688 MB |
+| css-spinner-render-compat | 150 | 55.7 / 54.9 dB | 11.1 → 2.1 s | 11.0 → 2.2 s | 1810 → 686 MB |
+| raf-ball-render-compat | 150 | 62 / 60 dB | 7.3 → 1.9 s | 10.5 → 2.3 s | 1635 → 677 MB |
+| gsap-letters-render-compat | 120 | 66.2 / 57.6 dB | 11.2 → 2.5 s | 13.0 → 2.0 s | 2335 → 704 MB |
+| many-cuts | 168 | 60.4 / 51.4 dB | 16.9 → 8.6 s | 18.1 → 6.3 s | 2240 → 805 MB |
+| speed-ramp | 120 | 47.6 / 45.8 dB | 8.1 → 4.5 s | 7.3 → 4.8 s | 1737 → 677 MB |
+| animejs-adapter | 180 | 49.7 / 39.5 dB | 9.4 → 3.2 s | 12.4 → 2.1 s | 1900 → 711 MB |
+| html-dir-rtl | 60 | 48.5 / 46.4 dB | 6.3 → 2.0 s | 2.7 → 1.5 s | 731 → 667 MB |
+| transparency-regression | 30 | 55.1 / 54.9 dB | 5.8 → 0.9 s | 1.8 → 1.3 s | 675 → 609 MB |
+| style-1-prod | 510 | 50.7 / 48.1 dB | 28.9 → 22.3 s | 57.5 → 43.2 s | 2577 → 1931 MB |
+| style-5-prod | 572 | 50.8 / 46.9 dB | 33.9 → 19.1 s | 72.0 → 18.3 s | 2646 → 1628 MB |
+| sub-composition-video | 390 | 49.3 / 48.4 dB | 29.6 → 21.3 s | 75.4 → 19.9 s | 2692 → 1564 MB |
+| typegpu-adapter | 180 | 52.9 / 51.1 dB | 9.3 → 5.5 s | 17.7 → 2.8 s | 2259 → 731 MB |
+| webgl-video-texture-render-compat | 60 | 45.8 / 42.3 dB | 50.9 → 48.4 s | 7.0 → 4.2 s | 1203 → 672 MB |
+| iframe-render-compat | 150 | 61.4 / 56.1 dB | 6.1 → 1.7 s | 11.7 → 1.6 s | 1903 → 617 MB |
+| pip-video-late-host | 180 | 51.7 / 47.7 dB | 15.0 → 15.8 s | 27.7 → 5.9 s | 1943 → 1160 MB |
+| variables-prod | 90 | 62.2 / 53.1 dB | 8.3 → 2.7 s | 7.3 → 2.0 s | 1553 → 724 MB |
+| hf2550-video-subcomposition-ghost | 1516 | 50.3 / 46 dB | 37.2 → 26.3 s | 145.7 → 118.1 s | 2885 → 2176 MB |
+| nested-sequential-video-local-start | 60 | 100 / 100 dB | 6.4 → 2.7 s | 3.2 → 4.2 s | 714 → 632 MB |
+| timed-descendant-visibility | 270 | 53.6 / 41.7 dB | 7.7 → 1.7 s | 5.9 → 1.8 s | 1652 → 647 MB |
+| vignelli-stacking | 308 | 52.3 / 48.5 dB | 17.1 → 12.6 s | 41.7 → 9.7 s | 2383 → 1268 MB |
+| page-side-shader-compositor-render-compat | 60 | 37.5 / 27.2 dB | 8.4 → 4.0 s | 5.2 → 4.1 s | 1184 → 792 MB |
+| gsap-call-render-seek | 180 | 53.1 / 49.3 dB | 7.7 → 3.0 s | 14.3 → 2.2 s | 2237 → 717 MB |
+| sub-comp-t0 | 180 | 58.4 / 47.6 dB | 10.9 → 2.7 s | 13.5 → 2.2 s | 2398 → 735 MB |
+
+</details>
+
+**code-video** (build-a-world, 20–30 s, 3 sub-frames): the skill's `render.mjs` takes 46.8 s, 115 s CPU and 3157 MB; FrameVelo 48.3 s, 12.3 s CPU and 1006 MB (41.5 dB). This three.js scene keeps the GPU busy on its own, so FrameVelo saves CPU and memory rather than time.
+
+Reproduce with `node scripts/parity.ts <projects>` and `research/bench/measure.mjs`.
 
 ## Requirements
 
