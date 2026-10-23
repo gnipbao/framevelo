@@ -127,6 +127,8 @@ FrameVelo has an MCP server, `framevelo mcp`, with three tools: `render`, `docto
 /plugin install framevelo@framevelo
 ```
 
+The plugin uses an installed `framevelo` when there is one. Otherwise, on its first start, it installs FrameVelo and the HyperFrames packages into `~/.cache/framevelo` (about a minute), and later starts take a fraction of a second. If Claude Code stops waiting during that first install, the install keeps going; reconnect with `/mcp` once it has finished.
+
 **Other MCP clients** (Codex, Cursor, Claude Desktop, ...): install once, then register `framevelo mcp`.
 
 ```bash

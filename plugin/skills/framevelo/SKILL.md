@@ -9,7 +9,7 @@ FrameVelo turns a page that draws its frames from code into an MP4. Frames stay 
 
 ## Calling it
 
-Use the MCP tools of this plugin when they are available:
+Use the MCP tools of this plugin when they are available. On its very first start the plugin installs FrameVelo into `~/.cache/framevelo` (about a minute); if the tools are missing right after installing the plugin, wait and reconnect (`/mcp`), or use the CLI below.
 
 - `render`: renders; returns the output path, frame count, size, timings, warnings and the last log lines.
 - `doctor`: checks Node, FFmpeg, Chrome, `drawElementImage`, the hardware encoders and HyperFrames support.

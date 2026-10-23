@@ -125,6 +125,8 @@ FrameVelo 自带 MCP 服务 `framevelo mcp`，提供三个工具：`render`、`d
 /plugin install framevelo@framevelo
 ```
 
+本机已安装 `framevelo` 时插件直接使用它；否则首次启动会把 FrameVelo 和 HyperFrames 包安装到 `~/.cache/framevelo`（约一分钟），之后的启动不到一秒。如果 Claude Code 在首次安装期间等不及，安装会在后台继续，装完后用 `/mcp` 重新连接即可。
+
 **其他 MCP 客户端**（Codex、Cursor、Claude Desktop 等）：先安装一次，再注册 `framevelo mcp`。
 
 ```bash

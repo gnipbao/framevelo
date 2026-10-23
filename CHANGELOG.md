@@ -10,7 +10,8 @@
   readable tool errors.
 - Claude Code plugin (`/plugin marketplace add gnipbao/framevelo`): the MCP server plus a skill with
   the render workflow, the page contract and what to do with each error. The launcher uses an
-  installed `framevelo` and falls back to `npx` from GitHub.
+  installed `framevelo`; otherwise it installs once into `~/.cache/framevelo`, detached so a client
+  that times out on the first start does not interrupt it, and later starts take about 0.2 s.
 - `--json` failures print `{"error": ...}` on stdout as well as the message on stderr.
 - `AGENTS.md` for agents working on the repository.
 
