@@ -260,3 +260,22 @@ node measure.mjs official -- npx hyperframes@0.8.186 render hfproj -o official.m
 - [MacBook Pro Technical Specifications](https://www.apple.com/macbook-pro/specs/)（M3 Pro：1 个视频编码引擎、1 个 ProRes 引擎；M3 Max：各 2 个）
 - [Chromium: VideoToolbox H.264 encode accelerator CL](https://codereview.chromium.org/1636083003)
 - [Mediabunny](https://github.com/Vanilagy/mediabunny)
+
+---
+
+## 附录：实现后的结论（v0.2，2026-10-23）
+
+M0–M3 已实现，架构说明见 [architecture.md](architecture.md)。与最初方案相比，有以下修正和新发现：
+
+| 主题 | 原方案 | 实际结论 |
+|---|---|---|
+| HyperFrames 适配 | 复用官方编译产物 | 采用官方面向第三方接入者的 `plan()`（`plan-dir-v1`）：编译、字体、子合成、视频抽帧、混音都交给官方；FrameVelo 只替换采集与编码，并通过 `window.__hf.seek` 驱动官方运行时 |
+| 浏览器 | 钉死 Chrome for Testing | 优先 `chrome-headless-shell`：画面一致，CPU 和内存约为完整版 Chrome 的一半（DOM 合成 CPU 13.2 s → 6.3 s，内存 1422 MB → 646 MB；纯 canvas CPU 7.9 s → 1.9 s） |
+| 抽帧自校验 | 每个区间抽样对比截图 | 已实现；路线切换会让 CSS 动画重启、iframe 重载、捕获画布内容丢失，均需专门处理；含 iframe 的页面跳过校验 |
+| 时间线副作用 | 未考虑 | 校验、子帧、复位都必须用静默 seek（`suppressEvents`），否则 GSAP `.call()` 会被重复触发 |
+| 音频 | 官方混音 + 封装 | `-shortest` 和输出端 `-t` 都会在音轨略短或起点为负（AAC 前导）时截掉视频尾帧；改为在音频输入端限长 |
+| 视频素材（HyperFrames） | 页面内 VideoDecoder 取代官方抽帧 | 保留官方抽帧 + 官方注入器。实测：换 `<img>` 后要多一次完整渲染更新才能进入 drawElement 快照（否则画面落后一帧，且偶发），每帧下限约一个帧间隔；页面内注入并不更快；原生 seek 帧精确但颜色走 Chrome 管线、远程源每次重新取数据、长 GOP 源慢 3.5 倍 |
+| 视频素材（普通页面） | 未细化 | `<video data-start>` 原生 seek（Chrome 硬件解码），逐帧精确；长 GOP 源自动生成全帧内代理（VideoToolbox，保留时间戳，带缓存），单关键帧 1080p 视频 31.1 s → 10.0 s（命中缓存约 8 s） |
+| 静帧去重 | 时间线静态分析 | 改为运行时观察：seek 后合成子树无 DOM 变动、动画时钟不变、无加载中的图片即复用上一帧绘制，输出逐字节一致 |
+| 图层光栅缓存 | 优化方向 O2 | 暂缓：`drawElementImage` 只能绘制画布的直接子元素，无法把缓存图层按层叠顺序与其余内容交错合成，等于重写合成器，保真风险高 |
+| 一致性测试 | 与官方输出做 PSNR 对齐 | `scripts/parity.ts` 在同一台机器上用官方 CLI 与 FrameVelo 渲染官方回归用例并逐帧对比，结果见 README |

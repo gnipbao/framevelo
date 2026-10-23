@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Canvas particles</title>
+  <style>html, body { margin: 0; background: #05060a; } canvas { display: block; }</style>
+</head>
+<body>
+  <canvas id="scene" width="1920" height="1080"></canvas>
+  <script>
+    // The whole film is a pure function of time: draw(t) paints frame t, nothing else keeps state.
+    const canvas = document.getElementById("scene");
+    const g = canvas.getContext("2d");
+    let seed = 7;
+    const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const particles = Array.from({ length: 1200 }, () => ({
+      x: random() * 1920, y: random() * 1080, r: 1 + random() * 4, v: 20 + random() * 90, hue: 180 + random() * 120,
+    }));
+
+    function draw(t) {
+      const bg = g.createLinearGradient(0, 0, 1920, 1080);
+      bg.addColorStop(0, `hsl(${220 + 20 * Math.sin(t)} 50% 12%)`);
+      bg.addColorStop(1, "#05060a");
+      g.fillStyle = bg;
+      g.fillRect(0, 0, 1920, 1080);
+      for (const p of particles) {
+        g.fillStyle = `hsla(${p.hue} 90% 65% / 0.8)`;
+        g.beginPath();
+        g.arc((p.x + p.v * t) % 1920, (p.y + 30 * Math.sin(t + p.x)) % 1080, p.r, 0, Math.PI * 2);
+        g.fill();
+      }
+      for (let i = 0; i < 36; i++) {
+        g.save();
+        g.translate(960 + 420 * Math.cos(t * 0.6 + i * 0.175), 540 + 300 * Math.sin(t * 0.9 + i * 0.175));
+        g.rotate(t * 2 + i);
+        g.fillStyle = `hsl(${i * 10} 80% 60%)`;
+        g.fillRect(-60, -35, 120, 70);
+        g.restore();
+      }
+      g.fillStyle = "#fff";
+      g.font = "800 120px -apple-system, Helvetica, sans-serif";
+      g.textAlign = "center";
+      g.fillText("Code the motion.", 960, 540 + 30 * Math.sin(t * 2));
+      g.font = "48px -apple-system, Helvetica, sans-serif";
+      g.fillStyle = "#9fb3ff";
+      g.fillText("Speed the render.", 960, 620);
+    }
+
+    window.__framevelo = { duration: 6, fps: 30, seek: draw };
+    draw(0);
+  </script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root { position: absolute; inset: 0; color: #fff; font-family: Helvetica, Arial, sans-serif; }
+        #stats-title { position: absolute; left: 160px; top: 140px; margin: 0; font-size: 72px; }
+        .bar-row { position: absolute; left: 160px; width: 1600px; height: 120px; }
+        .bar-label { position: absolute; left: 0; top: 36px; font-size: 36px; color: #9fb3ff; }
+        .bar { position: absolute; left: 320px; top: 20px; height: 80px; width: 1200px; border-radius: 16px; transform-origin: left center; }
+        .bar-value { position: absolute; right: 0; top: 30px; font-size: 44px; font-weight: 700; }
+      </style>
+      <div id="root" data-composition-id="stats" data-width="1920" data-height="1080">
+        <h2 id="stats-title">Render time, 10 s 4K film</h2>
+        <div class="bar-row" style="top: 340px">
+          <span class="bar-label">Screenshot</span>
+          <div class="bar" id="bar-a" style="background: #556"></div>
+          <span class="bar-value" id="val-a">47.5 s</span>
+        </div>
+        <div class="bar-row" style="top: 500px">
+          <span class="bar-label">GPU encode</span>
+          <div class="bar" id="bar-b" style="background: #778"></div>
+          <span class="bar-value" id="val-b">37.3 s</span>
+        </div>
+        <div class="bar-row" style="top: 660px">
+          <span class="bar-label">FrameVelo</span>
+          <div class="bar" id="bar-c" style="background: linear-gradient(90deg, #6cf, #c6f)"></div>
+          <span class="bar-value" id="val-c">9.7 s</span>
+        </div>
+      </div>
+      <script>
+        const tl = gsap.timeline({ paused: true });
+        tl.fromTo("#stats-title", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power3.out" }, 0)
+          .fromTo("#bar-a", { scaleX: 0 }, { scaleX: 1, duration: 1.2, ease: "power2.out" }, 0.3)
+          .fromTo("#bar-b", { scaleX: 0 }, { scaleX: 37.3 / 47.5, duration: 1.2, ease: "power2.out" }, 0.5)
+          .fromTo("#bar-c", { scaleX: 0 }, { scaleX: 9.7 / 47.5, duration: 1.2, ease: "power2.out" }, 0.7)
+          .fromTo(".bar-value", { opacity: 0 }, { opacity: 1, duration: 0.4, stagger: 0.2 }, 1.2);
+        window.__timelines["stats"] = tl;
+      </script>
+    </template>
+  </body>
+</html>

@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root { position: absolute; inset: 0; color: #fff; font-family: Helvetica, Arial, sans-serif; }
+        #intro-logo { position: absolute; left: 160px; top: 180px; width: 200px; height: 200px; }
+        #intro-title { position: absolute; left: 160px; top: 430px; margin: 0; font-size: 84px; letter-spacing: -2px; }
+        #intro-sub { position: absolute; left: 164px; top: 550px; margin: 0; font-size: 40px; color: #9fb3ff; }
+        #broll-frame { position: absolute; right: 160px; top: 260px; width: 720px; height: 405px; border-radius: 24px; overflow: hidden;
+                       box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
+        #broll { width: 100%; height: 100%; object-fit: cover; display: block; }
+      </style>
+      <div id="root" data-composition-id="intro" data-width="1920" data-height="1080">
+        <img id="intro-logo" src="assets/logo.png" alt="" />
+        <h1 id="intro-title">Code the motion.</h1>
+        <p id="intro-sub">Speed the render.</p>
+        <div id="broll-frame">
+          <video id="broll" src="assets/broll.mp4" muted playsinline data-start="1" data-duration="3" data-track-index="1"></video>
+        </div>
+      </div>
+      <script>
+        const tl = gsap.timeline({ paused: true });
+        tl.fromTo("#intro-logo", { scale: 0.4, rotation: -90, opacity: 0 }, { scale: 1, rotation: 0, opacity: 1, duration: 0.8, ease: "back.out(1.6)" }, 0.1)
+          .fromTo("#intro-title", { y: 60, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "power3.out" }, 0.3)
+          .fromTo("#intro-sub", { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 0.6)
+          .fromTo("#broll-frame", { x: 120, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power2.out" }, 1)
+          .to("#intro-title", { x: -40, opacity: 0, duration: 0.4, ease: "power2.in" }, 3.5);
+        window.__timelines["intro"] = tl;
+      </script>
+    </template>
+  </body>
+</html>

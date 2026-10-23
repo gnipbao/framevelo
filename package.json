@@ -1,0 +1,72 @@
+{
+  "name": "framevelo",
+  "version": "0.2.0",
+  "description": "A rendering accelerator for code-driven videos.",
+  "keywords": [
+    "video",
+    "render",
+    "webcodecs",
+    "videotoolbox",
+    "drawElementImage",
+    "html-in-canvas",
+    "hyperframes",
+    "gsap",
+    "motion-graphics"
+  ],
+  "homepage": "https://github.com/gnipbao/framevelo#readme",
+  "bugs": "https://github.com/gnipbao/framevelo/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gnipbao/framevelo.git"
+  },
+  "license": "Apache-2.0",
+  "author": "gnipbao",
+  "type": "module",
+  "bin": {
+    "framevelo": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --disable-warning=ExperimentalWarning test/*.test.ts",
+    "test:integration": "FRAMEVELO_INTEGRATION=1 node --test --disable-warning=ExperimentalWarning test/*.test.ts",
+    "framevelo": "node --disable-warning=ExperimentalWarning src/cli.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@puppeteer/browsers": "3.2.4",
+    "puppeteer-core": "25.13.0"
+  },
+  "peerDependencies": {
+    "@hyperframes/producer": ">=0.8.186 <0.9.0",
+    "@hyperframes/engine": ">=0.8.186 <0.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@hyperframes/producer": {
+      "optional": true
+    },
+    "@hyperframes/engine": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@hyperframes/engine": "0.8.186",
+    "@hyperframes/producer": "0.8.186",
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2"
+  }
+}
