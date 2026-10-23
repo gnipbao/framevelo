@@ -101,6 +101,8 @@ export interface CaptureResult {
   bytes: number;
   renderMs: number;
   page: PageRenderStats;
+  /** Node-driven frames: time in seek round trips, the beforeSample hook, and sample round trips. */
+  nodeLoop: { frames: number; seekMs: number; hookMs: number; sampleMs: number; verifyMs: number };
   probe: VideoProbe;
   /** DOM capture: the route of every interval and its verification samples. */
   plan: IntervalPlan[];
@@ -220,7 +222,11 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
       const policy: CapturePolicy = prepared.drawElementReady ? (job.capture ?? "auto") : "screenshot";
       const boundaries = await page.evaluate(() => (window as unknown as FvWindow).__fv.boundaries());
       const intervals = buildIntervals(job.startFrame, job.frames, job.fps, boundaries);
-      if (policy === "auto") {
+      if (policy === "auto" && prepared.hasEmbeddedDocuments) {
+        // Verification moves the composition between routes, which reloads iframes.
+        plan = intervals.map((interval) => ({ ...interval, route: "dom", samples: [], reason: "not verified: iframes reload when moved" }));
+        log("verification skipped: the composition contains iframes, which reload when moved; using drawElementImage");
+      } else if (policy === "auto") {
         const threshold = job.verifyThresholdDb ?? 30;
         const psnrByFrame = new Map<number, number>();
         for (const frame of new Set(intervals.flatMap(sampleFrames))) {
@@ -253,6 +259,7 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
         if (!prepared.drawElementReady && job.capture === "dom") log("drawElementImage is unavailable; using screenshot capture");
       }
     }
+    const planningMs = performance.now() - r0;
     const routes = mergeRoutes(plan);
     const routeOf = (frame: number): CaptureRoute => routes.find((r) => frame >= r.start && frame < r.end)?.route ?? "dom";
 
@@ -263,6 +270,15 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     let screenshotFrames = 0;
     const last = job.subframeOffsets.length - 1;
     const blurred = last > 0;
+    const loop = { frames: 0, seekMs: 0, hookMs: 0, sampleMs: 0, verifyMs: Math.round(planningMs) };
+    const timed = async <T>(key: "seekMs" | "hookMs" | "sampleMs", work: () => Promise<T>): Promise<T> => {
+      const t = performance.now();
+      try {
+        return await work();
+      } finally {
+        loop[key] += performance.now() - t;
+      }
+    };
     for (const segment of planSegments(job, routeOf)) {
       if (prepared.mode === "dom") await fv.setRoute(segment.route);
       if (!segment.hooked) {
@@ -276,25 +292,30 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
       }
       for (let frameIndex = segment.start; frameIndex < segment.start + segment.count; frameIndex++) {
         const frameTime = frameIndex / job.fps;
-        await fv.seek(frameTime);
+        loop.frames++;
+        await timed("seekMs", () => fv.seek(frameTime));
         for (let k = 0; k <= last; k++) {
           const t = Math.max(0, frameTime + job.subframeOffsets[k]!);
-          if (blurred) await fv.seek(t, true);
-          if (job.beforeSample) await job.beforeSample(t);
+          if (blurred) await timed("seekMs", () => fv.seek(t, true));
+          if (job.beforeSample) await timed("hookMs", () => job.beforeSample!(t));
           const encodeFrame = k === last ? frameIndex : null;
           if (segment.route === "screenshot") {
-            const shot = await screenshot();
-            await page.evaluate(
-              (b64, sub, frame) => (window as unknown as FvWindow).__fv.sampleScreenshot(b64, sub, frame ?? undefined),
-              shot,
-              k,
-              encodeFrame,
-            );
+            await timed("sampleMs", async () => {
+              const shot = await screenshot();
+              await page.evaluate(
+                (b64, sub, frame) => (window as unknown as FvWindow).__fv.sampleScreenshot(b64, sub, frame ?? undefined),
+                shot,
+                k,
+                encodeFrame,
+              );
+            });
           } else {
-            await page.evaluate((sub, frame) => (window as unknown as FvWindow).__fv.sample(sub, frame ?? undefined), k, encodeFrame);
+            await timed("sampleMs", () =>
+              page.evaluate((sub, frame) => (window as unknown as FvWindow).__fv.sample(sub, frame ?? undefined), k, encodeFrame),
+            );
           }
         }
-        if (blurred) await fv.seek(frameTime, true);
+        if (blurred) await timed("seekMs", () => fv.seek(frameTime, true));
         if (segment.route === "screenshot") screenshotFrames++;
       }
     }
@@ -316,7 +337,14 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     if (job.audio && !probe.audioCodec) throw new Error("The audio track is missing from the output.");
     await rename(staging, output);
     const { size } = await stat(output);
-    return { output, bytes: size, renderMs: Math.round(renderMs), page: pageStats, probe, plan, screenshotFrames };
+    const nodeLoop = {
+      frames: loop.frames,
+      seekMs: Math.round(loop.seekMs),
+      hookMs: Math.round(loop.hookMs),
+      sampleMs: Math.round(loop.sampleMs),
+      verifyMs: loop.verifyMs,
+    };
+    return { output, bytes: size, renderMs: Math.round(renderMs), page: pageStats, probe, plan, screenshotFrames, nodeLoop };
   } finally {
     mux?.kill();
     await cdp?.detach().catch(() => {});

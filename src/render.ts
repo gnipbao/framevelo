@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Browser } from "puppeteer-core";
-import { captureToFile, openCapturePage, preparePage, type CapturePage, type CapturePolicy } from "./capture.ts";
+import { captureToFile, openCapturePage, preparePage, type CapturePage, type CapturePolicy, type CaptureResult } from "./capture.ts";
 import { chromeMajor, findChrome, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
 import { isHyperFramesHtml, loadHyperFrames, PAGE_SIDE_COMPOSITING_FLAG, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
 import { defaultBitrate, evenDimension, frameCount, subframeOffsets, type Codec, type Quality } from "./options.ts";
@@ -78,9 +78,13 @@ export interface RenderResult {
   bytes: number;
   wallMs: number;
   renderMs: number;
+  /** Wall time of each stage: HyperFrames compile, page load and preparation, capture and encode. */
+  stages: { compileMs: number; prepareMs: number; renderMs: number };
   warnings: string[];
   /** DOM capture: route and verification samples of each interval. */
   plan: IntervalPlan[];
+  /** Node-driven frame loop timings (frames with video injection or screenshots). */
+  nodeLoop: CaptureResult["nodeLoop"];
   /** Frames captured through native screenshots instead of drawElementImage. */
   screenshotFrames: number;
   page: PageRenderStats;
@@ -150,8 +154,10 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
   // Chrome starts while the project compiles; neither needs the other.
   const browserLaunch = launchChrome(chromePath);
   browserLaunch.catch(() => {});
+  let compileMs = 0;
   try {
     let url: string;
+    const c0 = performance.now();
     if (useHyperFrames) {
       const api = await loadHyperFrames();
       const fps = options.fps ?? fpsFromHtml(html) ?? 30;
@@ -175,6 +181,8 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       url = `${server.origin}/${path.relative(root, file).split(path.sep).map(encodeURIComponent).join("/")}`;
     }
 
+    compileMs = performance.now() - c0;
+    const p0 = performance.now();
     browser = await browserLaunch;
     const version = await browser.version();
     log(`chrome ${version} (${chromePath})`);
@@ -190,6 +198,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       warnings.push(`Chrome ${chromeMajor(version)} predates reliable drawElementImage (${MIN_DOM_CHROME_MAJOR}+); verification decides per interval`);
     }
 
+    const prepareMs = performance.now() - p0;
     const fps = options.fps ?? prepared.fps ?? (useHyperFrames ? fpsFromHtml(html) : undefined) ?? 30;
     const start = options.start ?? 0;
     const duration = options.duration ?? (prepared.duration !== undefined ? prepared.duration - start : undefined);
@@ -209,10 +218,13 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     // The official injector swaps <video> elements for pre-extracted frames after each seek.
     let beforeSample: ((time: number) => Promise<void>) | undefined;
     let needsBeforeSample: ((time: number) => boolean) | undefined;
+    const offsets = subframeOffsets(options.subframes ?? 1, options.shutter ?? 0.5, fps);
     if (site?.videos) {
       const api = await loadHyperFrames();
       const lookup = api.engine.createFrameLookupTable(site.videos.videos, site.videos.extracted, site.planFps);
-      const inject = api.producer.createVideoFrameInjector(lookup);
+      const frameUrl = site.frameUrl;
+      // Frames load over same-origin HTTP rather than as base64 data URIs through the protocol.
+      const inject = api.producer.createVideoFrameInjector(lookup, { frameSrcResolver: (framePath) => frameUrl(framePath) });
       if (inject) {
         beforeSample = (time) => inject(capture.page, time);
         // Only frames inside a video's window (one frame of margin) need the round trip.
@@ -234,7 +246,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       height,
       codec,
       bitrate,
-      subframeOffsets: subframeOffsets(options.subframes ?? 1, options.shutter ?? 0.5, fps),
+      subframeOffsets: offsets,
       ...(options.capture ? { capture: options.capture } : {}),
       ...(options.reusePaints !== undefined ? { reusePaints: options.reusePaints } : {}),
       ...(options.verifyThresholdDb !== undefined ? { verifyThresholdDb: options.verifyThresholdDb } : {}),
@@ -266,8 +278,10 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       bytes: result.bytes,
       wallMs: Math.round(performance.now() - t0),
       renderMs: result.renderMs,
+      stages: { compileMs: Math.round(compileMs), prepareMs: Math.round(prepareMs), renderMs: result.renderMs },
       warnings,
       plan: result.plan,
+      nodeLoop: result.nodeLoop,
       screenshotFrames: result.screenshotFrames,
       page: result.page,
     };

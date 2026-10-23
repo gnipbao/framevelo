@@ -73,3 +73,4 @@ test("withConsoleRoutedTo restores the console when the call throws", async () =
   }), /boom/);
   assert.equal(console.warn, original);
 });
+

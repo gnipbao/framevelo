@@ -7,7 +7,7 @@
 //   video injector    swap <video> elements for the extracted frame of each time    (official)
 //   drawElementImage → WebCodecs → stream-copy mux with the plan's audio            (FrameVelo)
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -55,7 +55,10 @@ interface ProducerApi {
     preHeadScripts?: string[];
     fps?: { num: number; den: number };
   }): Promise<{ url: string; close(): void }>;
-  createVideoFrameInjector(lookup: unknown): ((page: Page, time: number) => Promise<void>) | null;
+  createVideoFrameInjector(
+    lookup: unknown,
+    options?: { frameSrcResolver?: (framePath: string) => string | null },
+  ): ((page: Page, time: number) => Promise<void>) | null;
 }
 interface EngineApi {
   createFrameLookupTable(videos: unknown[], extracted: unknown[], fps?: number): unknown;
@@ -111,7 +114,7 @@ interface PlanVideosJson {
  * Rebuild the extracted-frame descriptors of a plan directory (layout "plan-dir-v1"): frames live
  * in video-frames/<videoId>/ and are numbered in presentation order.
  */
-export function readPlanVideos(planDir: string): { videos: unknown[]; extracted: unknown[] } | null {
+export function readPlanVideos(planDir: string, framesDir = path.join(planDir, "video-frames")): { videos: unknown[]; extracted: unknown[] } | null {
   const metaPath = path.join(planDir, "meta", "videos.json");
   if (!existsSync(metaPath)) return null;
   const meta = JSON.parse(readFileSync(metaPath, "utf8")) as PlanVideosJson;
@@ -121,7 +124,7 @@ export function readPlanVideos(planDir: string): { videos: unknown[]; extracted:
     return match ? Number(match[1]) : null;
   };
   const extracted = meta.extracted.map((video) => {
-    const outputDir = path.join(planDir, "video-frames", video.videoId);
+    const outputDir = path.join(framesDir, video.videoId);
     if (!existsSync(outputDir)) throw new Error(`The HyperFrames plan has no extracted frames for video "${video.videoId}".`);
     const ext = (path.extname(video.framePattern) || ".jpg").toLowerCase();
     const files = readdirSync(outputDir)
@@ -164,6 +167,9 @@ export async function withConsoleRoutedTo<T>(log: (message: string) => void, fn:
   }
 }
 
+/** Directory inside the served site that holds the plan's extracted video frames. */
+export const SERVED_FRAMES_DIR = "__fv_video_frames";
+
 export interface HyperFramesSite {
   url: string;
   planDir: string;
@@ -171,6 +177,11 @@ export interface HyperFramesSite {
   planFps: number;
   audioPath: string | null;
   videos: { videos: unknown[]; extracted: unknown[] } | null;
+  /**
+   * Same-origin URL of an extracted frame. The page loads frames over HTTP instead of receiving
+   * base64 data URIs through the DevTools protocol; same origin keeps the capture canvas untainted.
+   */
+  frameUrl(framePath: string): string | null;
   producerVersion: string;
   close(): Promise<void>;
 }
@@ -202,6 +213,9 @@ export async function prepareHyperFramesSite(
       api.distributed.plan(options.projectDir, { fps, width: options.width, height: options.height, format: "mp4", logger }, planDir),
     );
     const compiledDir = path.join(planDir, "compiled");
+    // Serve the extracted video frames from the site itself.
+    const framesDir = path.join(compiledDir, SERVED_FRAMES_DIR);
+    if (existsSync(path.join(planDir, "video-frames"))) renameSync(path.join(planDir, "video-frames"), framesDir);
     const server = await api.producer.createFileServer({
       projectDir: compiledDir,
       compiledDir,
@@ -216,13 +230,19 @@ export async function prepareHyperFramesSite(
     } catch {
       audioPath = null;
     }
+    const origin = server.url.replace(/\/$/, "");
     return {
-      url: `${server.url.replace(/\/$/, "")}/index.html`,
+      url: `${origin}/index.html`,
       planDir,
       totalFrames: plan.totalFrames,
       planFps: fps,
       audioPath,
-      videos: readPlanVideos(planDir),
+      videos: readPlanVideos(planDir, framesDir),
+      frameUrl: (framePath) => {
+        const relative = path.relative(framesDir, framePath);
+        if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
+        return `${origin}/${SERVED_FRAMES_DIR}/${relative.split(path.sep).map(encodeURIComponent).join("/")}`;
+      },
       producerVersion: plan.producerVersion,
       close: async () => {
         try {

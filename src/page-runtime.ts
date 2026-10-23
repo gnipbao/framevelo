@@ -27,6 +27,8 @@ export interface PagePrepareResult {
   chromeHasDrawElement: boolean;
   /** DOM mode only: whether drawElementImage capture is set up (otherwise only screenshots work). */
   drawElementReady: boolean;
+  /** The captured element holds iframes/objects, which reload when moved between routes. */
+  hasEmbeddedDocuments: boolean;
   /** WebGL/WebGPU canvases composited under the DOM paint (DOM mode). */
   acceleratedCanvases: number;
   warnings: string[];
@@ -90,7 +92,7 @@ export interface FrameVeloPageApi {
    * DOM mode: "dom" keeps the captured element inside the capture canvas (drawElementImage);
    * "screenshot" moves it back into the page so the compositor paints it for a native screenshot.
    */
-  setRoute(route: "dom" | "screenshot"): void;
+  setRoute(route: "dom" | "screenshot"): Promise<void>;
   /** Viewport rectangle of the captured element, for a screenshot clip. */
   targetRect(): { x: number; y: number; width: number; height: number };
   /** Composition times (seconds) where clips start or end: natural interval boundaries. */
@@ -426,6 +428,7 @@ export function pageInstallRuntime(): void {
       cssWidth,
       cssHeight,
       drawElementReady: Boolean(capture),
+      hasEmbeddedDocuments: Boolean(target.querySelector("iframe, object, embed")),
       ...(target instanceof HTMLCanvasElement ? { canvasWidth: target.width, canvasHeight: target.height } : {}),
       ...(duration !== undefined ? { duration } : {}),
       ...(fps !== undefined ? { fps } : {}),
@@ -738,7 +741,7 @@ export function pageInstallRuntime(): void {
     if (encodeFrame !== undefined) await encode(encodeFrame);
   }
 
-  function setRoute(route: "dom" | "screenshot"): void {
+  async function setRoute(route: "dom" | "screenshot"): Promise<void> {
     if (!state || state.mode !== "dom") return;
     const st = state;
     if (route === st.route) return;
@@ -756,6 +759,24 @@ export function pageInstallRuntime(): void {
     st.route = route;
     // The capture canvas loses its content when the composition leaves it.
     st.forcePaint = true;
+    // Moving an iframe reloads it; wait for the documents before the caller seeks again.
+    const frames = Array.from(st.target.querySelectorAll("iframe"));
+    await Promise.all(
+      frames.map(
+        (frame) =>
+          new Promise<void>((resolve) => {
+            const timer = clock.setTimeout(resolve, 10_000);
+            frame.addEventListener(
+              "load",
+              () => {
+                clock.clearTimeout(timer);
+                resolve();
+              },
+              { once: true },
+            );
+          }),
+      ),
+    );
   }
 
   function targetRect(): { x: number; y: number; width: number; height: number } {
@@ -788,7 +809,7 @@ export function pageInstallRuntime(): void {
   async function paintOnly(): Promise<void> {
     const { s, st } = requireSession();
     if (st.mode !== "dom" || !st.capture) return;
-    setRoute("dom");
+    await setRoute("dom");
     await paint(s, st);
     verifyCopy ??= new OffscreenCanvas(s.o.width, s.o.height);
     const ctx = verifyCopy.getContext("2d")!;
