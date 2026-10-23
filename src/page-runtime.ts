@@ -105,6 +105,11 @@ export interface FrameVeloPageApi {
   boundaries(): number[];
   /** Paint the current state with drawElementImage without encoding (verification). */
   paintOnly(): Promise<void>;
+  /**
+   * Let one full rendering update pass without drawing. An <img> whose source just changed (an
+   * injected video frame) reaches drawElementImage only after such an update.
+   */
+  settle(): Promise<void>;
   /** PSNR (dB) between the last drawElementImage paint and a native screenshot, at reduced size. */
   compareScreenshot(base64: string): Promise<number>;
   /** PNG data URL of the last drawElementImage paint (debugging verification). */
@@ -600,6 +605,24 @@ export function pageInstallRuntime(): void {
     return parts.join("|");
   }
 
+  /** Run one rendering update through the capture canvas's paint event, drawing nothing. */
+  function settleRendering(): Promise<void> {
+    const st = state;
+    if (!st || st.mode !== "dom" || st.route !== "dom" || !st.capture) return Promise.resolve();
+    const capture = st.capture as HTMLCanvasElement & { onpaint: (() => void) | null; requestPaint(): void };
+    st.forcePaint = true;
+    return new Promise<void>((resolve) => {
+      const timer = clock.setTimeout(resolve, 2000);
+      capture.onpaint = () => {
+        clock.clearTimeout(timer);
+        resolve();
+      };
+      const sentinel = st.sentinel!;
+      sentinel.style.backgroundColor = sentinel.style.backgroundColor === "rgb(0, 0, 0)" ? "rgb(1, 1, 1)" : "rgb(0, 0, 0)";
+      capture.requestPaint();
+    });
+  }
+
   async function paint(s: Session, st: State): Promise<void> {
     if (st.mode !== "dom") return;
     await composite();
@@ -992,6 +1015,7 @@ export function pageInstallRuntime(): void {
     targetRect,
     boundaries,
     paintOnly,
+    settle: settleRendering,
     compareScreenshot,
     composite,
     captureDataUrl: () => {

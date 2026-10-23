@@ -173,7 +173,10 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
   // Verification seeks are administrative: quiet, so timeline callbacks fire only during the render.
   const quietSeekAndHook = async (t: number) => {
     await fv.seek(t, true);
-    if (job.beforeSample && (job.needsBeforeSample?.(t) ?? true)) await job.beforeSample(t);
+    if (job.beforeSample && (job.needsBeforeSample?.(t) ?? true)) {
+      await job.beforeSample(t);
+      await page.evaluate(() => (window as unknown as FvWindow).__fv.settle());
+    }
   };
 
   const audioEncoder = job.audio ? (job.audio.copy ? "copy" : await detectAacEncoder(job.ffmpegPath)) : undefined;
@@ -297,7 +300,13 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
         for (let k = 0; k <= last; k++) {
           const t = Math.max(0, frameTime + job.subframeOffsets[k]!);
           if (blurred) await timed("seekMs", () => fv.seek(t, true));
-          if (job.beforeSample) await timed("hookMs", () => job.beforeSample!(t));
+          if (job.beforeSample) {
+            await timed("hookMs", async () => {
+              await job.beforeSample!(t);
+              // Injected frames swap <img> sources; let them reach the paint record first.
+              if (segment.route === "dom") await page.evaluate(() => (window as unknown as FvWindow).__fv.settle());
+            });
+          }
           const encodeFrame = k === last ? frameIndex : null;
           if (segment.route === "screenshot") {
             await timed("sampleMs", async () => {
