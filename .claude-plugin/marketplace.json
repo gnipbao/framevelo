@@ -1,0 +1,17 @@
+{
+  "name": "framevelo",
+  "owner": {
+    "name": "gnipbao",
+    "url": "https://github.com/gnipbao"
+  },
+  "metadata": {
+    "description": "FrameVelo: a rendering accelerator for code-driven videos."
+  },
+  "plugins": [
+    {
+      "name": "framevelo",
+      "source": "./plugin",
+      "description": "Render HyperFrames projects, code-video compositions and seekable HTML pages to MP4 on the GPU and the hardware encoder: MCP tools plus a skill."
+    }
+  ]
+}

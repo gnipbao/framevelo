@@ -14,9 +14,10 @@ GPU or the hardware encoder; Node only moves compressed bytes and orchestrates.
 
 | File | Role |
 |---|---|
-| `src/cli.ts` | `framevelo render`, `doctor`, `browser install|path` |
+| `src/cli.ts` | `framevelo render`, `doctor`, `browser install|path`, `mcp` |
+| `src/mcp.ts` | MCP server on stdio for coding agents: `render`, `doctor`, `install_browser` tools, progress, cancellation |
 | `src/render.ts` | Orchestration: input, compile (HyperFrames), browser, page preparation, video hooks, `captureToFile` |
-| `src/capture.ts` | Opens the capture page, plans routes (verification), runs the frame loop, muxes, verifies, renames |
+| `src/capture.ts` | Opens the capture page, plans routes (verification), runs the frame loop (split across pages for Node-driven frames), muxes, verifies, renames |
 | `src/page-runtime.ts` | Code that runs in the page: time drivers, capture canvas, paint, encoder, routes, media sync |
 | `src/planner.ts` | Intervals, verification samples, routing, PSNR |
 | `src/hyperframes.ts` | Optional HyperFrames integration through `@hyperframes/producer` |
