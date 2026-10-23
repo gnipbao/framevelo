@@ -84,6 +84,30 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     assert.ok(psnr > 0 && psnr < 20, `the video region should change once the b-roll is injected (PSNR ${psnr} dB)`);
   });
 
+  test("plain page <video data-start> is frame-exact on the composition clock", async () => {
+    const output = path.join(dir, "video-page.mp4");
+    const result = await render({ input: path.join(examples, "video-page"), output, frames: 60 });
+    assert.equal(result.page.frames, 60);
+    // Output frame i shows source frame i - 15 (data-start 0.5 s at 30 fps). Compare the source's
+    // timecode corner in grayscale against the expected source frame and its neighbours.
+    const source = path.join(examples, "video-page", "assets", "clip.mp4");
+    const corner = (input: string, frame: number, x: number, y: number) =>
+      `[${input}]select=eq(n\\,${frame}),crop=200:44:${x}:${y},format=gray,setpts=0`;
+    const psnr = (frame: number, sourceFrame: number) => {
+      const { stderr } = spawnSync(
+        "ffmpeg",
+        ["-hide_banner", "-i", output, "-i", source, "-lavfi", `${corner("0:v", frame, 160, 200)}[a];${corner("1:v", sourceFrame, 0, 0)}[b];[a][b]psnr`, "-f", "null", "-"],
+        { encoding: "utf8" },
+      );
+      const value = /average:(\S+)/.exec(stderr)?.[1];
+      return value === "inf" ? 100 : Number(value);
+    };
+    for (const frame of [31, 44, 59]) {
+      const exact = psnr(frame, frame - 15);
+      assert.ok(exact > psnr(frame, frame - 16) && exact > psnr(frame, frame - 14), `frame ${frame} shows source frame ${frame - 15}`);
+    }
+  });
+
   test("a page without a time driver fails clearly and leaves no partial file", async () => {
     const output = path.join(dir, "fail.mp4");
     await assert.rejects(

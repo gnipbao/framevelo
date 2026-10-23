@@ -50,8 +50,33 @@ export function resolveInsideRoot(root: string, urlPath: string): string | null 
 }
 
 /**
+ * Parse a single-range `Range: bytes=...` header against a file of `size` bytes. Returns null for
+ * no or an unsupported header (serve the whole file) and "unsatisfiable" for a range past the end.
+ */
+export function parseRange(header: string | undefined, size: number): { start: number; end: number } | "unsatisfiable" | null {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (match[1] === "" && match[2] === "")) return null;
+  let start: number;
+  let end: number;
+  if (match[1] === "") {
+    // Suffix range: the last N bytes.
+    const suffix = Number(match[2]);
+    if (suffix === 0) return "unsatisfiable";
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] === "" ? size - 1 : Math.min(Number(match[2]), size - 1);
+  }
+  if (start >= size || start > end) return "unsatisfiable";
+  return { start, end };
+}
+
+/**
  * Serve `root` on 127.0.0.1 so the page runs in a secure context (WebCodecs requires one) and can
- * load its relative assets. Only GET/HEAD, only files inside `root`.
+ * load its relative assets. Only GET/HEAD, only files inside `root`. Byte ranges are supported:
+ * Chrome needs them to seek in audio and video files.
  */
 export async function serveDirectory(root: string): Promise<StaticServer> {
   const absoluteRoot = path.resolve(root);
@@ -72,16 +97,26 @@ export async function serveDirectory(root: string): Promise<StaticServer> {
         filePath = path.join(filePath, "index.html");
         info = await stat(filePath);
       }
-      res.writeHead(200, {
-        "content-type": CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream",
-        "content-length": info.size,
+      const contentType = CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
+      const range = parseRange(req.headers.range, info.size);
+      if (range === "unsatisfiable") {
+        res.writeHead(416, { "content-range": `bytes */${info.size}` }).end();
+        return;
+      }
+      res.writeHead(range ? 206 : 200, {
+        "content-type": contentType,
+        "content-length": range ? range.end - range.start + 1 : info.size,
+        "accept-ranges": "bytes",
         "cache-control": "no-store",
+        ...(range ? { "content-range": `bytes ${range.start}-${range.end}/${info.size}` } : {}),
       });
       if (req.method === "HEAD") {
         res.end();
         return;
       }
-      createReadStream(filePath).on("error", () => res.destroy()).pipe(res);
+      createReadStream(filePath, range ?? {})
+        .on("error", () => res.destroy())
+        .pipe(res);
     } catch {
       res.writeHead(404).end();
     }

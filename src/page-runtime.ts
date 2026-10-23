@@ -29,6 +29,8 @@ export interface PagePrepareResult {
   drawElementReady: boolean;
   /** The captured element holds iframes/objects, which reload when moved between routes. */
   hasEmbeddedDocuments: boolean;
+  /** <video data-start> elements FrameVelo keeps on the composition clock (plain pages). */
+  managedVideos: number;
   /** WebGL/WebGPU canvases composited under the DOM paint (DOM mode). */
   acceleratedCanvases: number;
   warnings: string[];
@@ -202,8 +204,58 @@ export function pageInstallRuntime(): void {
     /** Animation clock signature at the last paint. */
     animationSignature: string;
     reuseBlocker: string | null;
+    /** Videos seeked to the composition time on every seek (plain pages, <video data-start>). */
+    media: HTMLVideoElement[];
   }
   let state: State | null = null;
+
+  const mediaNumber = (el: Element, name: string, fallback: number): number => {
+    const raw = el.getAttribute(name);
+    const n = raw == null ? NaN : Number(raw);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  /** Resolve once `target` fires `event`, or after `ms`. */
+  const eventOrTimeout = (target: EventTarget, event: string, ms: number) =>
+    new Promise<void>((resolve) => {
+      const timer = clock.setTimeout(resolve, ms);
+      target.addEventListener(
+        event,
+        () => {
+          clock.clearTimeout(timer);
+          resolve();
+        },
+        { once: true },
+      );
+    });
+
+  /**
+   * Put every managed video on the composition clock: media time = data-media-start +
+   * (t - data-start) * data-playback-rate, held at the ends of its data-duration window. Waits
+   * for the seek and for the new frame to reach the compositor. Returns whether any frame changed.
+   */
+  async function syncMedia(st: State, t: number): Promise<boolean> {
+    if (!st.media.length) return false;
+    const waits: Array<Promise<void>> = [];
+    let changed = false;
+    for (const video of st.media) {
+      const start = mediaNumber(video, "data-start", 0);
+      const mediaStart = mediaNumber(video, "data-media-start", 0);
+      const duration = mediaNumber(video, "data-duration", Infinity);
+      const rate = mediaNumber(video, "data-playback-rate", 1);
+      const local = Math.min(Math.max(t - start, 0), duration);
+      const end = Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.001) : Infinity;
+      // A hair past the frame time so the frame that starts exactly at t is the one shown.
+      const mediaTime = Math.min(mediaStart + local * rate + 1e-4, end);
+      if (Math.abs(video.currentTime - mediaTime) < 1e-6) continue;
+      changed = true;
+      video.currentTime = mediaTime;
+      waits.push(eventOrTimeout(video, "seeked", 5000));
+    }
+    await Promise.all(waits);
+    if (changed) st.dirty = true;
+    return changed;
+  }
 
   interface Session {
     o: PageEncodeOptions;
@@ -410,12 +462,26 @@ export function pageInstallRuntime(): void {
       forcePaint: true,
       animationSignature: "",
       reuseBlocker: null,
+      media: [],
     };
     const st = state;
+    if (found.driver !== "hyperframes") {
+      // HyperFrames swaps videos for extracted frames itself; plain pages opt in with data-start.
+      st.media = Array.from(target.querySelectorAll<HTMLVideoElement>("video[data-start]"));
+      for (const video of st.media) {
+        video.pause();
+        video.muted = true;
+        if (video.readyState < 2) await eventOrTimeout(video, "loadeddata", options.readyTimeoutMs);
+        if (video.readyState < 2) warnings.push(`video ${video.id || video.currentSrc} did not load`);
+      }
+    }
+    const unmanagedVideo = found.driver !== "hyperframes" && Array.from(target.querySelectorAll("video")).some((v) => !st.media.includes(v));
     // Content that changes without DOM mutations makes paint reuse unsafe.
     const blocker = target.querySelector("canvas, iframe, object, embed, animate, animateTransform, animateMotion, set")
       ? "canvas, iframe or SMIL content"
-      : null;
+      : unmanagedVideo
+        ? "a <video> without data-start, which the page seeks itself"
+        : null;
     st.reuseBlocker = blocker;
     if (!blocker) {
       new MutationObserver(() => {
@@ -429,6 +495,7 @@ export function pageInstallRuntime(): void {
       cssHeight,
       drawElementReady: Boolean(capture),
       hasEmbeddedDocuments: Boolean(target.querySelector("iframe, object, embed")),
+      managedVideos: state.media.length,
       ...(target instanceof HTMLCanvasElement ? { canvasWidth: target.width, canvasHeight: target.height } : {}),
       ...(duration !== undefined ? { duration } : {}),
       ...(fps !== undefined ? { fps } : {}),
@@ -672,7 +739,9 @@ export function pageInstallRuntime(): void {
   async function seek(t: number, quiet = false): Promise<void> {
     const { s, st } = requireSession();
     const s0 = clock.now();
-    await st.seek(Math.max(0, t), quiet);
+    const time = Math.max(0, t);
+    await st.seek(time, quiet);
+    await syncMedia(st, time);
     s.stats.seekMs += clock.now() - s0;
   }
 

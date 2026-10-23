@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
-import { resolveInsideRoot, serveDirectory, type StaticServer } from "../src/server.ts";
+import { parseRange, resolveInsideRoot, serveDirectory, type StaticServer } from "../src/server.ts";
 
 test("resolveInsideRoot keeps paths inside the root", () => {
   const root = path.resolve("/srv/project");
@@ -13,6 +13,18 @@ test("resolveInsideRoot keeps paths inside the root", () => {
   assert.equal(resolveInsideRoot(root, "/%2e%2e/%2e%2e/etc/passwd"), path.join(root, "etc/passwd"));
   assert.equal(resolveInsideRoot(root, "/a%00b"), null);
   assert.equal(resolveInsideRoot(root, "/%E0%A4%A"), null, "malformed escapes are rejected");
+});
+
+test("parseRange handles open, closed, suffix and invalid ranges", () => {
+  assert.equal(parseRange(undefined, 100), null);
+  assert.deepEqual(parseRange("bytes=0-9", 100), { start: 0, end: 9 });
+  assert.deepEqual(parseRange("bytes=90-", 100), { start: 90, end: 99 });
+  assert.deepEqual(parseRange("bytes=-10", 100), { start: 90, end: 99 });
+  assert.deepEqual(parseRange("bytes=50-500", 100), { start: 50, end: 99 });
+  assert.equal(parseRange("bytes=100-", 100), "unsatisfiable");
+  assert.equal(parseRange("bytes=9-3", 100), "unsatisfiable");
+  assert.equal(parseRange("bytes=0-1,5-6", 100), null, "multipart ranges fall back to the whole file");
+  assert.equal(parseRange("items=0-1", 100), null);
 });
 
 let dir: string;
@@ -45,6 +57,19 @@ test("never serves files outside the root", async () => {
     const res = await fetch(`${server.origin}${probe}`);
     assert.notEqual(await res.text(), "secret", probe);
   }
+});
+
+test("serves byte ranges so media can seek", async () => {
+  const whole = await fetch(`${server.origin}/index.html`);
+  assert.equal(whole.headers.get("accept-ranges"), "bytes");
+  await whole.arrayBuffer();
+  const part = await fetch(`${server.origin}/index.html`, { headers: { range: "bytes=3-5" } });
+  assert.equal(part.status, 206);
+  assert.equal(part.headers.get("content-range"), "bytes 3-5/9");
+  assert.equal(await part.text(), "hi<");
+  const beyond = await fetch(`${server.origin}/index.html`, { headers: { range: "bytes=50-" } });
+  assert.equal(beyond.status, 416);
+  await beyond.arrayBuffer();
 });
 
 test("rejects other methods and missing files", async () => {
