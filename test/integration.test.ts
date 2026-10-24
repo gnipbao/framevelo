@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { findChrome, isHeadlessShell } from "../src/chrome.ts";
 import { runDoctor } from "../src/doctor.ts";
 import { probeVideo } from "../src/ffmpeg.ts";
 import { render } from "../src/render.ts";
@@ -22,7 +24,8 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
   const encoders = new Set<string>();
   before(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "framevelo-it-"));
-    // Keep video proxies out of the user's cache.
+    // Keep video proxies out of the user's cache, but keep the browser found there.
+    process.env.FRAMEVELO_CHROME ??= findChrome() ?? undefined;
     process.env.FRAMEVELO_CACHE_DIR = path.join(dir, "cache");
     for (const check of await runDoctor()) if (check.name.startsWith("Encoder ") && check.ok) encoders.add(check.name.slice(8));
   });
@@ -161,6 +164,16 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
       const exact = psnr(frame, frame - 15);
       assert.ok(exact > psnr(frame, frame - 16) && exact > psnr(frame, frame - 14), `frame ${frame} shows source frame ${frame - 15}`);
     }
+  });
+
+  test("full Chrome renders HyperFrames pages that are not in front", async (t) => {
+    // Full Chrome paints only its front tab; the fresh page after verification is not in front.
+    const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    if (!existsSync(chrome) || !isHeadlessShell(process.env.FRAMEVELO_CHROME ?? "")) return t.skip("needs Google Chrome next to the headless shell");
+    const output = path.join(dir, "full-chrome.mp4");
+    const result = await render({ ...logging, input: path.join(examples, "hyperframes-project"), output, start: 0.5, frames: 30, chromePath: chrome });
+    assert.match(result.chrome, /^Chrome\//);
+    assert.equal((await probeVideo(output)).packets, 30);
   });
 
   test("a page without a time driver fails clearly and leaves no partial file", async () => {

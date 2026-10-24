@@ -33,9 +33,11 @@ export async function openCapturePage(
   browser: Browser,
   url: string,
   viewport: { width: number; height: number },
-  options: { seedRandom?: boolean } = {},
+  options: { seedRandom?: boolean; ownWindow?: boolean } = {},
 ): Promise<CapturePage> {
-  const page = await browser.newPage();
+  // Full Chrome keeps its tabs in one window and paints only the front one: a capture page that is
+  // not in front would never paint. Each page gets a window of its own there.
+  const page = await browser.newPage(options.ownWindow ? { type: "window" } : undefined);
   await page.setViewport({ width: viewport.width, height: viewport.height, deviceScaleFactor: 1 });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error instanceof Error ? error.message : String(error)));

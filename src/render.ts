@@ -11,7 +11,7 @@ import {
   type CaptureResult,
   type CaptureWorker,
 } from "./capture.ts";
-import { chromeMajor, findChrome, framevelCacheDir, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
+import { chromeMajor, findChrome, framevelCacheDir, isHeadlessShell, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
 import { ensureProxy } from "./media-proxy.ts";
 import { isHyperFramesHtml, loadHyperFrames, PAGE_SIDE_COMPOSITING_FLAG, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
 import { defaultBitrate, evenDimension, frameCount, subframeOffsets, type Codec, type Quality } from "./options.ts";
@@ -283,8 +283,9 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       readyTimeoutMs: options.readyTimeoutMs ?? (useHyperFrames ? 45_000 : 10_000),
       ...(useHyperFrames ? { expectHyperFrames: true } : {}),
     } as const;
+    const pageSetup = { seedRandom: !useHyperFrames, ownWindow: !isHeadlessShell(chromePath) };
     const openPrepared = async () => {
-      const page = await openCapturePage(browser!, url, viewport, { seedRandom: !useHyperFrames });
+      const page = await openCapturePage(browser!, url, viewport, pageSetup);
       try {
         return { page, ready: await preparePage(page, pageOptions) };
       } catch (error) {
@@ -296,7 +297,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     // fresh one: prepare that page alongside the main one, so a slow page pays its readiness wait once.
     let spare = useHyperFrames ? openPrepared() : undefined;
     spare?.catch(() => {});
-    const capture: CapturePage = await openCapturePage(browser, url, viewport, { seedRandom: !useHyperFrames });
+    const capture: CapturePage = await openCapturePage(browser, url, viewport, pageSetup);
     const prepared: PagePrepareResult = await preparePage(capture, pageOptions);
     warnings.push(...prepared.warnings);
     if (prepared.mode === "dom" && prepared.drawElementReady && chromeMajor(version) < MIN_DOM_CHROME_MAJOR) {
