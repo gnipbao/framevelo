@@ -360,10 +360,11 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
           const next: Lane = { driver: pageDriver(worker.page, job.width), hook: worker.beforeSample, ...(lane.part ? { part: lane.part } : {}) };
           await attach(worker.page, i, i === 0 ? firstLaneSink(next) : (bytes) => appendFile(next.part!, bytes));
           await begin(worker.page);
-          // Release the verified page's encoder; a worker page is closed outright.
-          if (lane === main) await job.page.evaluate(() => (window as unknown as FvWindow).__fv.end()).catch(() => {});
-          else await workers.find((w) => w.page === lane.driver.page)?.close().catch(() => {});
+          // Close the verified page: left open, it holds a second copy of the composition (about
+          // 170 MB on a 1080p DOM page) for the whole render.
           await lane.driver.detach();
+          if (lane === main) await job.page.close().catch(() => {});
+          else await workers.find((w) => w.page === lane.driver.page)?.close().catch(() => {});
           lanes[i] = next;
           replaced++;
         }),
