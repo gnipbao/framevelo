@@ -27,6 +27,11 @@
 
 - A page replaced after verification is now closed: it kept a second copy of the composition for the
   whole render (about 170 MB more peak memory on a 1080p DOM page).
+- HyperFrames: the fresh page prepares alongside the main one, so a page that waits out the readiness
+  timeout pays it once (`webgl-video-texture-render-compat`: 94 s back to 49 s).
+- Full Chrome: every capture page opens in a window of its own. Chrome paints only its front tab, so a
+  second page (the fresh page, a worker) never painted and HyperFrames renders hung;
+  `chrome-headless-shell` was unaffected.
 
 - HyperFrames: the first frames could show the composition as it was at the last verified moment.
   Verification seeks quietly out of order, the HyperFrames runtime still runs callbacks at each
