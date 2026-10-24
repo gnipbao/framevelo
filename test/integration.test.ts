@@ -1,7 +1,7 @@
 // End-to-end renders through real Chrome and FFmpeg. Enabled with FRAMEVELO_INTEGRATION=1.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cp, mkdtemp, readdir, rm } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -42,6 +42,11 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     assert.equal(probe.packets, 30);
     assert.deepEqual([probe.width, probe.height], [1920, 1080]);
     assert.equal(probe.colorTransfer, "bt709");
+    // Apple players read the colour description from the MP4 colr box: BT.709 primaries, transfer, matrix.
+    const mp4 = await readFile(output);
+    const colr = mp4.indexOf("colrnclx");
+    assert.ok(colr > 0, "the MP4 has an nclx colr box");
+    assert.deepEqual([mp4.readUInt16BE(colr + 8), mp4.readUInt16BE(colr + 10), mp4.readUInt16BE(colr + 12)], [1, 1, 1]);
   });
 
   test("DOM page through drawElementImage, scaled to 4K", async (t) => {

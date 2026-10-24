@@ -25,6 +25,10 @@
 
 ### Fixes
 
+- MP4 colour description: the `colr` box said sRGB (transfer 13), from Chrome's canvas frames, while
+  the H.264/HEVC bitstream said BT.709. QuickTime and Safari read the box, so FrameVelo files were
+  shown with the sRGB curve since 0.1.0. The muxer now tags the stream BT.709 as well. Found by CI,
+  whose FFmpeg 9 reports the container's value.
 - A page replaced after verification is now closed: it kept a second copy of the composition for the
   whole render (about 170 MB more peak memory on a 1080p DOM page).
 - HyperFrames: the fresh page prepares alongside the main one, so a page that waits out the readiness

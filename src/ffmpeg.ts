@@ -34,7 +34,8 @@ export function frameTimeBase(fps: number): string {
  * without decoding or re-encoding.
  *
  * Bitstream filters: `*_metadata` rewrites the VUI to BT.709 SDR (Chrome tags canvas frames with
- * the sRGB transfer, which video players and editors do not expect), and `setts` gives frame N the
+ * the sRGB transfer, which video players and editors do not expect; the colour options do the same
+ * for the MP4 colr box), and `setts` gives frame N the
  * timestamp N. Raw Annex-B carries no timestamps; without them `-shortest` drops the audio track.
  * Frame-index timestamps are exact because the encoder emits I and P frames only, in order.
  */
@@ -63,6 +64,16 @@ export function buildMuxArgs(options: MuxArgsOptions): string[] {
     "copy",
     "-bsf:v",
     `${metadataFilter},${timestampFilter}`,
+    // The MP4 colr box comes from the stream parameters, which still carry Chrome's sRGB transfer:
+    // without these, Apple players read sRGB from the container while the bitstream says BT.709.
+    "-color_primaries",
+    "bt709",
+    "-color_trc",
+    "bt709",
+    "-colorspace",
+    "bt709",
+    "-color_range",
+    "tv",
     ...(codec === "hevc" ? ["-tag:v", "hvc1"] : []),
     ...(audio
       ? options.audioEncoder === "copy"
