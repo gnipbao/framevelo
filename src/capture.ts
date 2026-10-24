@@ -103,6 +103,8 @@ export interface CaptureJob {
   workers?: number;
   /** Open and prepare another page on the same composition, with its own `beforeSample`. */
   openWorker?: () => Promise<CaptureWorker>;
+  /** Called once every page the render uses is open, so pages opened ahead of time can be closed. */
+  pagesReady?: () => void;
   paintTimeoutMs?: number;
   ffmpegPath?: string;
   ffprobePath?: string;
@@ -372,6 +374,7 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
       log(`verified pages replaced by ${replaced} fresh page${replaced === 1 ? "" : "s"} (${Math.round(performance.now() - f0)} ms)`);
     }
     rendering.push(...lanes);
+    job.pagesReady?.();
     const ranges = splitRange(job.startFrame, job.frames, lanes.length);
     if (lanes.length > 1) {
       const first = lanes[0]!;

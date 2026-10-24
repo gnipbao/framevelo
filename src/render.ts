@@ -283,6 +283,19 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       readyTimeoutMs: options.readyTimeoutMs ?? (useHyperFrames ? 45_000 : 10_000),
       ...(useHyperFrames ? { expectHyperFrames: true } : {}),
     } as const;
+    const openPrepared = async () => {
+      const page = await openCapturePage(browser!, url, viewport, { seedRandom: !useHyperFrames });
+      try {
+        return { page, ready: await preparePage(page, pageOptions) };
+      } catch (error) {
+        await page.page.close().catch(() => {});
+        throw error;
+      }
+    };
+    // A HyperFrames page nearly always verifies, and a page that verified hands its range to a
+    // fresh one: prepare that page alongside the main one, so a slow page pays its readiness wait once.
+    let spare = useHyperFrames ? openPrepared() : undefined;
+    spare?.catch(() => {});
     const capture: CapturePage = await openCapturePage(browser, url, viewport, { seedRandom: !useHyperFrames });
     const prepared: PagePrepareResult = await preparePage(capture, pageOptions);
     warnings.push(...prepared.warnings);
@@ -335,9 +348,10 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     }
     const beforeSample = hookFor?.(capture.page);
     const openWorker = async (): Promise<CaptureWorker> => {
-      const worker = await openCapturePage(browser!, url, viewport, { seedRandom: !useHyperFrames });
+      const taken = spare;
+      spare = undefined;
+      const { page: worker, ready } = (await taken?.catch(() => undefined)) ?? (await openPrepared());
       try {
-        const ready = await preparePage(worker, pageOptions);
         if (ready.mode !== prepared.mode || ready.cssWidth !== prepared.cssWidth || ready.cssHeight !== prepared.cssHeight) {
           throw new Error("a worker page prepared differently from the main page");
         }
@@ -381,6 +395,11 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       ...(needsBeforeSample ? { needsBeforeSample } : {}),
       workers: options.workers ?? defaultWorkers(),
       openWorker,
+      pagesReady: () => {
+        const unused = spare;
+        spare = undefined;
+        void unused?.then(({ page }) => page.page.close()).catch(() => {});
+      },
       ...(options.ffmpegPath ? { ffmpegPath: options.ffmpegPath } : {}),
       ...(options.ffprobePath ? { ffprobePath: options.ffprobePath } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
