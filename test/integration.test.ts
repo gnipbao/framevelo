@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { runDoctor } from "../src/doctor.ts";
 import { probeVideo } from "../src/ffmpeg.ts";
 import { render } from "../src/render.ts";
 
@@ -15,10 +16,13 @@ const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtur
 
 describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=1" }, () => {
   let dir: string;
+  // Encoders differ between machines: CI runners have no hardware HEVC encoder, for instance.
+  const encoders = new Set<string>();
   before(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "framevelo-it-"));
     // Keep video proxies out of the user's cache.
     process.env.FRAMEVELO_CACHE_DIR = path.join(dir, "cache");
+    for (const check of await runDoctor()) if (check.name.startsWith("Encoder ") && check.ok) encoders.add(check.name.slice(8));
   });
   after(async () => {
     await rm(dir, { recursive: true, force: true });
@@ -35,7 +39,8 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     assert.equal(probe.colorTransfer, "bt709");
   });
 
-  test("DOM page through drawElementImage, scaled to 4K", async () => {
+  test("DOM page through drawElementImage, scaled to 4K", async (t) => {
+    if (!encoders.has("H.264 4K")) return t.skip("this Chrome cannot encode H.264 at 4K");
     const output = path.join(dir, "dom-4k.mp4");
     const result = await render({ input: path.join(examples, "dom-cards"), output, frames: 15, scale: 2 });
     assert.equal(result.mode, "dom");
@@ -44,7 +49,8 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     assert.deepEqual([probe.width, probe.height], [3840, 2160]);
   });
 
-  test("HEVC, motion blur sub-frames and an audio track", async () => {
+  test("HEVC, motion blur sub-frames and an audio track", async (t) => {
+    if (!encoders.has("HEVC 1080p")) return t.skip("this Chrome cannot encode HEVC");
     const audio = path.join(dir, "tone.wav");
     execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=5", audio]);
     const output = path.join(dir, "hevc.mp4");

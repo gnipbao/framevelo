@@ -178,10 +178,12 @@ describe("mcp server (integration)", { skip: process.env.FRAMEVELO_INTEGRATION !
     const output = path.join(dir, "cancelled.mp4");
     const { id } = client.request("tools/call", {
       name: "render",
-      arguments: { input: path.join(examples, "dom-cards"), output, frames: 600, scale: 2 },
+      arguments: { input: path.join(examples, "dom-cards"), output, frames: 900 },
       _meta: { progressToken: "p2" },
     });
+    const started = Date.now() + 60_000;
     while (!client.notifications.some((n) => n.method === "notifications/progress" && n.params.progressToken === "p2")) {
+      assert.ok(Date.now() < started, `no progress within a minute:\n${client.stderr.slice(-2000)}`);
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     client.send({ method: "notifications/cancelled", params: { requestId: id, reason: "test" } });
