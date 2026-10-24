@@ -159,7 +159,8 @@ range requests, without which Chrome cannot seek in MP4.
 
 ## Measuring
 
-`scripts/parity.ts` renders projects with the official CLI and with FrameVelo on the same machine and
-reports per-frame PSNR, audio, wall time, CPU and peak memory. `research/bench` holds the original
-pipeline benchmarks. `FRAMEVELO_VERIFY_DUMP=<dir>` writes each verification pair;
+`bench/run.ts` runs the benchmark suite behind [benchmarks.md](benchmarks.md) and `bench/parity.ts`
+renders any projects with the official CLI and with FrameVelo on the same machine; both report
+per-frame PSNR, wall time, CPU and peak memory of the whole process tree. The prototype pipeline
+benchmarks of the feasibility study live in the first commit. `FRAMEVELO_VERIFY_DUMP=<dir>` writes each verification pair;
 `FRAMEVELO_DUMP_STREAM=<file>` keeps the raw encoded stream.

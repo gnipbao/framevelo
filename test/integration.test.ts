@@ -1,24 +1,33 @@
 // End-to-end renders through real Chrome and FFmpeg. Enabled with FRAMEVELO_INTEGRATION=1.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cp, mkdtemp, readdir, rm } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { findChrome, isHeadlessShell } from "../src/chrome.ts";
+import { runDoctor } from "../src/doctor.ts";
 import { probeVideo } from "../src/ffmpeg.ts";
 import { render } from "../src/render.ts";
 
 const enabled = process.env.FRAMEVELO_INTEGRATION === "1";
+// On CI, render logs show how far a slow or stuck render got.
+const logging = process.env.CI ? { onLog: (line: string) => process.stderr.write(`  [framevelo] ${line}\n`) } : {};
 const examples = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "examples");
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
 describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=1" }, () => {
   let dir: string;
+  // Encoders differ between machines: CI runners have no hardware HEVC encoder, for instance.
+  const encoders = new Set<string>();
   before(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "framevelo-it-"));
-    // Keep video proxies out of the user's cache.
+    // Keep video proxies out of the user's cache, but keep the browser found there.
+    process.env.FRAMEVELO_CHROME ??= findChrome() ?? undefined;
     process.env.FRAMEVELO_CACHE_DIR = path.join(dir, "cache");
+    for (const check of await runDoctor()) if (check.name.startsWith("Encoder ") && check.ok) encoders.add(check.name.slice(8));
   });
   after(async () => {
     await rm(dir, { recursive: true, force: true });
@@ -26,30 +35,38 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
 
   test("canvas page: exact frame count, size, BT.709 tags", async () => {
     const output = path.join(dir, "canvas.mp4");
-    const result = await render({ input: path.join(examples, "canvas-particles"), output, frames: 30 });
+    const result = await render({ ...logging, input: path.join(examples, "canvas-particles"), output, frames: 30 });
     assert.equal(result.mode, "canvas");
     assert.equal(result.driver, "framevelo");
     const probe = await probeVideo(output);
     assert.equal(probe.packets, 30);
     assert.deepEqual([probe.width, probe.height], [1920, 1080]);
     assert.equal(probe.colorTransfer, "bt709");
+    // Apple players read the colour description from the MP4 colr box: BT.709 primaries, transfer, matrix.
+    const mp4 = await readFile(output);
+    const colr = mp4.indexOf("colrnclx");
+    assert.ok(colr > 0, "the MP4 has an nclx colr box");
+    assert.deepEqual([mp4.readUInt16BE(colr + 8), mp4.readUInt16BE(colr + 10), mp4.readUInt16BE(colr + 12)], [1, 1, 1]);
   });
 
-  test("DOM page through drawElementImage, scaled to 4K", async () => {
+  test("DOM page through drawElementImage, scaled to 4K", async (t) => {
+    if (!encoders.has("H.264 4K")) return t.skip("this Chrome cannot encode H.264 at 4K");
     const output = path.join(dir, "dom-4k.mp4");
-    const result = await render({ input: path.join(examples, "dom-cards"), output, frames: 15, scale: 2 });
+    const result = await render({ ...logging, input: path.join(examples, "dom-cards"), output, frames: 15, scale: 2 });
     assert.equal(result.mode, "dom");
     const probe = await probeVideo(output);
     assert.equal(probe.packets, 15);
     assert.deepEqual([probe.width, probe.height], [3840, 2160]);
   });
 
-  test("HEVC, motion blur sub-frames and an audio track", async () => {
+  test("HEVC, motion blur sub-frames and an audio track", async (t) => {
+    if (!encoders.has("HEVC 1080p")) return t.skip("this Chrome cannot encode HEVC");
     const audio = path.join(dir, "tone.wav");
     execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=5", audio]);
     const output = path.join(dir, "hevc.mp4");
     let lastProgress = 0;
     await render({
+      ...logging,
       input: path.join(examples, "canvas-particles"),
       output,
       codec: "hevc",
@@ -67,11 +84,11 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
   });
 
   test("Node-driven frames split across worker pages concatenate seamlessly", async () => {
-    const common = { input: path.join(examples, "dom-cards"), capture: "screenshot", fps: 120, frames: 400, width: 640, height: 360 } as const;
+    const common = { input: path.join(examples, "dom-cards"), capture: "screenshot", fps: 120, frames: 400, width: 320, height: 180 } as const;
     const single = path.join(dir, "workers-1.mp4");
     const split = path.join(dir, "workers-2.mp4");
-    assert.equal((await render({ ...common, output: single, workers: 1 })).workers, 1);
-    const result = await render({ ...common, output: split, workers: 2 });
+    assert.equal((await render({ ...logging, ...common, output: single, workers: 1 })).workers, 1);
+    const result = await render({ ...logging, ...common, output: split, workers: 2 });
     assert.equal(result.workers, 2);
     assert.equal((await probeVideo(split)).packets, 400);
     const keyframes = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "frame=key_frame", "-of", "csv=p=0", split], { encoding: "utf8" })
@@ -87,7 +104,7 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
   test("HyperFrames project: official compile and runtime, injected video, plan audio", async () => {
     const output = path.join(dir, "hyperframes.mp4");
     // Frames 15..44 (0.5 s to 1.5 s) cross the b-roll's entrance at 1 s.
-    const result = await render({ input: path.join(examples, "hyperframes-project"), output, start: 0.5, frames: 30 });
+    const result = await render({ ...logging, input: path.join(examples, "hyperframes-project"), output, start: 0.5, frames: 30 });
     assert.equal(result.pipeline, "hyperframes");
     assert.equal(result.driver, "hyperframes");
     assert.equal(result.audio, true);
@@ -114,10 +131,10 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     // second alone verifies nothing past 0.5 s. Their first 30 frames must match.
     const long = path.join(dir, "callbacks-long.mp4");
     const short = path.join(dir, "callbacks-short.mp4");
-    const result = await render({ input: project, output: long, capture: "auto", workers: 1 });
+    const result = await render({ ...logging, input: project, output: long, capture: "auto", workers: 1 });
     assert.equal(result.pipeline, "hyperframes");
     assert.equal(result.frames, 180);
-    await render({ input: project, output: short, capture: "auto", frames: 30, workers: 1 });
+    await render({ ...logging, input: project, output: short, capture: "auto", frames: 30, workers: 1 });
     const { stderr } = spawnSync(
       "ffmpeg",
       ["-hide_banner", "-i", long, "-i", short, "-lavfi", "[0:v]trim=end_frame=30[a];[1:v]trim=end_frame=30[b];[a][b]psnr", "-f", "null", "-"],
@@ -132,7 +149,7 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
 
   test("plain page <video data-start> is frame-exact on the composition clock", async () => {
     const output = path.join(dir, "video-page.mp4");
-    const result = await render({ input: path.join(examples, "video-page"), output, frames: 60 });
+    const result = await render({ ...logging, input: path.join(examples, "video-page"), output, frames: 60 });
     assert.equal(result.page.frames, 60);
     // Output frame i shows source frame i - 15 (data-start 0.5 s at 30 fps). Compare the source's
     // timecode corner in grayscale against the expected source frame and its neighbours.
@@ -154,10 +171,20 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     }
   });
 
+  test("full Chrome renders HyperFrames pages that are not in front", async (t) => {
+    // Full Chrome paints only its front tab; the fresh page after verification is not in front.
+    const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    if (!existsSync(chrome) || !isHeadlessShell(process.env.FRAMEVELO_CHROME ?? "")) return t.skip("needs Google Chrome next to the headless shell");
+    const output = path.join(dir, "full-chrome.mp4");
+    const result = await render({ ...logging, input: path.join(examples, "hyperframes-project"), output, start: 0.5, frames: 30, chromePath: chrome });
+    assert.match(result.chrome, /^Chrome\//);
+    assert.equal((await probeVideo(output)).packets, 30);
+  });
+
   test("a page without a time driver fails clearly and leaves no partial file", async () => {
     const output = path.join(dir, "fail.mp4");
     await assert.rejects(
-      render({ input: path.join(examples, "..", "test", "fixtures", "no-seek.html"), output, frames: 5, readyTimeoutMs: 200 }),
+      render({ ...logging, input: path.join(examples, "..", "test", "fixtures", "no-seek.html"), output, frames: 5, readyTimeoutMs: 200 }),
       /no way to seek time/,
     );
     assert.deepEqual((await readdir(dir)).filter((f) => f.includes("fail")), []);

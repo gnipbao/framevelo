@@ -33,9 +33,11 @@ export async function openCapturePage(
   browser: Browser,
   url: string,
   viewport: { width: number; height: number },
-  options: { seedRandom?: boolean } = {},
+  options: { seedRandom?: boolean; ownWindow?: boolean } = {},
 ): Promise<CapturePage> {
-  const page = await browser.newPage();
+  // Full Chrome keeps its tabs in one window and paints only the front one: a capture page that is
+  // not in front would never paint. Each page gets a window of its own there.
+  const page = await browser.newPage(options.ownWindow ? { type: "window" } : undefined);
   await page.setViewport({ width: viewport.width, height: viewport.height, deviceScaleFactor: 1 });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error instanceof Error ? error.message : String(error)));
@@ -103,6 +105,8 @@ export interface CaptureJob {
   workers?: number;
   /** Open and prepare another page on the same composition, with its own `beforeSample`. */
   openWorker?: () => Promise<CaptureWorker>;
+  /** Called once every page the render uses is open, so pages opened ahead of time can be closed. */
+  pagesReady?: () => void;
   paintTimeoutMs?: number;
   ffmpegPath?: string;
   ffprobePath?: string;
@@ -360,10 +364,11 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
           const next: Lane = { driver: pageDriver(worker.page, job.width), hook: worker.beforeSample, ...(lane.part ? { part: lane.part } : {}) };
           await attach(worker.page, i, i === 0 ? firstLaneSink(next) : (bytes) => appendFile(next.part!, bytes));
           await begin(worker.page);
-          // Release the verified page's encoder; a worker page is closed outright.
-          if (lane === main) await job.page.evaluate(() => (window as unknown as FvWindow).__fv.end()).catch(() => {});
-          else await workers.find((w) => w.page === lane.driver.page)?.close().catch(() => {});
+          // Close the verified page: left open, it holds a second copy of the composition (about
+          // 170 MB on a 1080p DOM page) for the whole render.
           await lane.driver.detach();
+          if (lane === main) await job.page.close().catch(() => {});
+          else await workers.find((w) => w.page === lane.driver.page)?.close().catch(() => {});
           lanes[i] = next;
           replaced++;
         }),
@@ -371,6 +376,7 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
       log(`verified pages replaced by ${replaced} fresh page${replaced === 1 ? "" : "s"} (${Math.round(performance.now() - f0)} ms)`);
     }
     rendering.push(...lanes);
+    job.pagesReady?.();
     const ranges = splitRange(job.startFrame, job.frames, lanes.length);
     if (lanes.length > 1) {
       const first = lanes[0]!;

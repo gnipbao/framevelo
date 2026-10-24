@@ -29,7 +29,7 @@ test("renderOptionsFromArgs maps and checks tool arguments", () => {
     quality: "draft",
     bitrate: "12M",
     hyperframes: false,
-    mounts: { "/@skill/": "/skills/code-video" },
+    mounts: { "/vendor/": "/shared/vendor" },
   });
   assert.equal(options.output, "/out/a.mp4");
   assert.equal(options.frames, 30);
@@ -37,7 +37,7 @@ test("renderOptionsFromArgs maps and checks tool arguments", () => {
   assert.equal(options.quality, "draft");
   assert.equal(options.bitrate, 12_000_000);
   assert.equal(options.hyperframes, "off");
-  assert.deepEqual(options.mounts, { "/@skill/": "/skills/code-video" });
+  assert.deepEqual(options.mounts, { "/vendor/": "/shared/vendor" });
   assert.equal(renderOptionsFromArgs({ input: "/work/promo" }).output, "/work/promo.mp4");
   assert.throws(() => renderOptionsFromArgs({}), /input is required/);
   assert.throws(() => renderOptionsFromArgs({ input: "/a", frames: 1.5 }), /frames must be an integer/);
@@ -178,10 +178,12 @@ describe("mcp server (integration)", { skip: process.env.FRAMEVELO_INTEGRATION !
     const output = path.join(dir, "cancelled.mp4");
     const { id } = client.request("tools/call", {
       name: "render",
-      arguments: { input: path.join(examples, "dom-cards"), output, frames: 600, scale: 2 },
+      arguments: { input: path.join(examples, "dom-cards"), output, frames: 900 },
       _meta: { progressToken: "p2" },
     });
+    const started = Date.now() + 60_000;
     while (!client.notifications.some((n) => n.method === "notifications/progress" && n.params.progressToken === "p2")) {
+      assert.ok(Date.now() < started, `no progress within a minute:\n${client.stderr.slice(-2000)}`);
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     client.send({ method: "notifications/cancelled", params: { requestId: id, reason: "test" } });

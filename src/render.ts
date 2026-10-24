@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,7 +11,7 @@ import {
   type CaptureResult,
   type CaptureWorker,
 } from "./capture.ts";
-import { chromeMajor, findChrome, framevelCacheDir, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
+import { chromeMajor, findChrome, framevelCacheDir, isHeadlessShell, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
 import { ensureProxy } from "./media-proxy.ts";
 import { isHyperFramesHtml, loadHyperFrames, PAGE_SIDE_COMPOSITING_FLAG, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
 import { defaultBitrate, evenDimension, frameCount, subframeOffsets, type Codec, type Quality } from "./options.ts";
@@ -58,8 +57,8 @@ export interface RenderOptions {
   shutter?: number;
   background?: string;
   /**
-   * Extra directories to serve, keyed by URL prefix ("/@skill/" → a skill directory). A page that
-   * imports from /@skill/ gets the code-video skill mounted automatically when it can be found.
+   * Extra directories to serve, keyed by URL prefix ("/vendor/" → a directory outside the project),
+   * for pages that load shared files from absolute paths.
    */
   mounts?: Record<string, string>;
   /**
@@ -160,17 +159,6 @@ export function videoWindows(videos: unknown[]): Array<[number, number]> | null 
     windows.push([start, end]);
   }
   return windows;
-}
-
-/** code-video compositions import their runtime from /@skill/. */
-export function isCodeVideoHtml(html: string): boolean {
-  return /["'(]\/@skill\//.test(html) || /\bdefineComposition\s*\(/.test(html);
-}
-
-/** The code-video skill directory: CODE_VIDEO_SKILL_DIR, else ~/.claude/skills/code-video. */
-export function findCodeVideoSkill(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string | null {
-  const candidates = [env.CODE_VIDEO_SKILL_DIR, path.join(home, ".claude", "skills", "code-video")];
-  return candidates.find((dir): dir is string => Boolean(dir) && existsSync(path.join(dir!, "runtime", "comp.js"))) ?? null;
 }
 
 /** A served URL back to the file it came from (the root or a mount), or null. */
@@ -278,19 +266,8 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       if (path.basename(file) !== "index.html") warnings.push(`compiled ${root} as a HyperFrames project (entry index.html)`);
     } else {
       const mounts: Record<string, string> = { ...options.mounts, [PROXY_URL_PREFIX]: proxyCacheDir() };
-      const codeVideo = isCodeVideoHtml(html);
-      if (codeVideo && !Object.keys(mounts).some((prefix) => prefix.replace(/\/?$/, "/") === "/@skill/")) {
-        const skill = findCodeVideoSkill();
-        if (skill) {
-          mounts["/@skill/"] = skill;
-          log(`code-video composition: serving ${skill} at /@skill/`);
-        } else {
-          warnings.push("the page imports /@skill/ but no code-video skill was found; set CODE_VIDEO_SKILL_DIR or pass --mount /@skill/=<dir>");
-        }
-      }
       server = await serveDirectory(root, { mounts });
-      // code-video compositions render without their preview controls in render mode.
-      url = `${server.origin}/${path.relative(root, file).split(path.sep).map(encodeURIComponent).join("/")}${codeVideo ? "?render=1" : ""}`;
+      url = `${server.origin}/${path.relative(root, file).split(path.sep).map(encodeURIComponent).join("/")}`;
     }
 
     compileMs = performance.now() - c0;
@@ -306,7 +283,21 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       readyTimeoutMs: options.readyTimeoutMs ?? (useHyperFrames ? 45_000 : 10_000),
       ...(useHyperFrames ? { expectHyperFrames: true } : {}),
     } as const;
-    const capture: CapturePage = await openCapturePage(browser, url, viewport, { seedRandom: !useHyperFrames });
+    const pageSetup = { seedRandom: !useHyperFrames, ownWindow: !isHeadlessShell(chromePath) };
+    const openPrepared = async () => {
+      const page = await openCapturePage(browser!, url, viewport, pageSetup);
+      try {
+        return { page, ready: await preparePage(page, pageOptions) };
+      } catch (error) {
+        await page.page.close().catch(() => {});
+        throw error;
+      }
+    };
+    // A HyperFrames page nearly always verifies, and a page that verified hands its range to a
+    // fresh one: prepare that page alongside the main one, so a slow page pays its readiness wait once.
+    let spare = useHyperFrames ? openPrepared() : undefined;
+    spare?.catch(() => {});
+    const capture: CapturePage = await openCapturePage(browser, url, viewport, pageSetup);
     const prepared: PagePrepareResult = await preparePage(capture, pageOptions);
     warnings.push(...prepared.warnings);
     if (prepared.mode === "dom" && prepared.drawElementReady && chromeMajor(version) < MIN_DOM_CHROME_MAJOR) {
@@ -358,9 +349,10 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     }
     const beforeSample = hookFor?.(capture.page);
     const openWorker = async (): Promise<CaptureWorker> => {
-      const worker = await openCapturePage(browser!, url, viewport, { seedRandom: !useHyperFrames });
+      const taken = spare;
+      spare = undefined;
+      const { page: worker, ready } = (await taken?.catch(() => undefined)) ?? (await openPrepared());
       try {
-        const ready = await preparePage(worker, pageOptions);
         if (ready.mode !== prepared.mode || ready.cssWidth !== prepared.cssWidth || ready.cssHeight !== prepared.cssHeight) {
           throw new Error("a worker page prepared differently from the main page");
         }
@@ -378,8 +370,8 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     let declaredAudio: string | undefined;
     if (!options.audio && !site && prepared.audio && server) {
       declaredAudio = localFileForUrl(prepared.audio, server.origin, root, options.mounts) ?? undefined;
-      if (declaredAudio) log(`audio: ${path.relative(root, declaredAudio) || declaredAudio} (declared by the composition)`);
-      else warnings.push(`the composition declares audio ${prepared.audio}, which is not a local file`);
+      if (declaredAudio) log(`audio: ${path.relative(root, declaredAudio) || declaredAudio} (declared by the page)`);
+      else warnings.push(`the page declares audio ${prepared.audio}, which is not a local file`);
     }
     const audioPath = options.audio ? path.resolve(options.audio) : (site?.audioPath ?? declaredAudio);
     const result = await captureToFile({
@@ -404,6 +396,11 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       ...(needsBeforeSample ? { needsBeforeSample } : {}),
       workers: options.workers ?? defaultWorkers(),
       openWorker,
+      pagesReady: () => {
+        const unused = spare;
+        spare = undefined;
+        void unused?.then(({ page }) => page.page.close()).catch(() => {});
+      },
       ...(options.ffmpegPath ? { ffmpegPath: options.ffmpegPath } : {}),
       ...(options.ffprobePath ? { ffprobePath: options.ffprobePath } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),

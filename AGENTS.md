@@ -11,5 +11,6 @@ To render something rather than change this repository, follow [plugin/skills/fr
 - Map of the code and the measured design decisions: [docs/architecture.md](docs/architecture.md). Start there before changing capture or encoding.
 - `src/page-runtime.ts` runs inside the page: its functions are serialized by `page.evaluate`, so they cannot use module-level variables or Node APIs.
 - Runtime dependencies are `puppeteer-core` and `@puppeteer/browsers` only; HyperFrames packages are optional peers loaded on demand. Keep it that way.
-- Performance claims are measured, not assumed. `node scripts/parity.ts <projects>` renders with `hyperframes render` and FrameVelo and reports PSNR, wall time, CPU and peak memory. Measure on an idle machine, one render at a time; screen recorders and other renders skew the numbers. The bar: exact frame counts, and at least 40 dB average PSNR against the official render.
+- Performance claims are measured, not assumed. `node bench/parity.ts <projects>` renders with `hyperframes render` and FrameVelo and reports PSNR, wall time, CPU and peak memory; `node bench/run.ts` and `node bench/report.ts` regenerate [docs/benchmarks.md](docs/benchmarks.md). Measure on an idle machine, one render at a time; screen recorders and other renders skew the numbers. The bar: exact frame counts, and at least 40 dB average PSNR against the official render.
+- Keep the three READMEs (`README.md`, `README.zh-CN.md`, `README.ja.md`) in step when one changes.
 - Work on a branch and open one pull request when the work is done. Commit messages say why.

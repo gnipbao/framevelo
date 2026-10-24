@@ -21,6 +21,9 @@ test("video-only mux copies the stream, tags BT.709 and stamps frame timestamps"
   const bsf = valueAfter(args, "-bsf:v")!;
   assert.match(bsf, /^h264_metadata=.*colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1/);
   assert.match(bsf, /setts=ts=N:duration=1:time_base=1\/30$/);
+  // The container's colr box follows the stream parameters, not the rewritten bitstream.
+  for (const option of ["-color_primaries", "-color_trc", "-colorspace"]) assert.equal(valueAfter(args, option), "bt709");
+  assert.equal(valueAfter(args, "-color_range"), "tv");
   assert.ok(!args.includes("-shortest"));
   assert.ok(!args.includes("-tag:v"));
   assert.equal(args.at(-1), "out.mp4");

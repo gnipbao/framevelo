@@ -1,6 +1,6 @@
 ---
 name: framevelo
-description: Render code-driven videos to MP4 fast with FrameVelo, on the GPU and the hardware encoder - HyperFrames projects, code-video compositions (defineComposition), and any HTML/CSS/GSAP or Canvas/WebGL page that is a pure function of time. Use when the user wants such a page or project rendered, exported or previewed as a video (渲染视频、导出 MP4、出片、预览一段), wants a render to be faster or lighter on CPU and memory (加速渲染), or wants an HTML animation made renderable frame by frame. Not for editing existing video files or generating video with AI models.
+description: Render code-driven videos to MP4 fast with FrameVelo, on the GPU and the hardware encoder - HyperFrames projects and any HTML/CSS/GSAP or Canvas/WebGL page that is a pure function of time. Use when the user wants such a page or project rendered, exported or previewed as a video (渲染视频、导出 MP4、出片、预览一段), wants a render to be faster or lighter on CPU and memory (加速渲染), or wants an HTML animation made renderable frame by frame. Not for editing existing video files or generating video with AI models.
 ---
 
 # FrameVelo
@@ -27,7 +27,7 @@ Use absolute paths. Run one render at a time: they share the single hardware enc
 
 ## Workflow
 
-1. **Find the input**: a project directory with `index.html`, or an `.html` file. Duration, fps and size come from the page (HyperFrames `data-duration`/`data-fps`/`data-width`, `window.__framevelo.duration`, the GSAP timeline length, `window.__comp`). Pass them only to override.
+1. **Find the input**: a project directory with `index.html`, or an `.html` file. Duration, fps and size come from the page (HyperFrames `data-duration`/`data-fps`/`data-width`, `window.__framevelo.duration`, the GSAP timeline length). Pass them only to override.
 2. **Preview a slice** when the composition is new or just changed: `{ input, output: "/tmp/preview.mp4", start: 2, frames: 30, quality: "draft" }`. This takes seconds. Look at a frame: `ffmpeg -v error -ss 0.5 -i /tmp/preview.mp4 -frames:v 1 /tmp/preview.png`, then view the PNG.
 3. **Render in full** with defaults. Add `scale: 2` for 4K from a 1080p layout, or `subframes: 3` for motion blur.
 4. **Check the result**: `frames` is the count you expected; `audio` is true when the composition has sound; read `warnings`. `screenshotFrames > 0` means some intervals failed verification and were captured by screenshot (still correct, just slower).
@@ -37,7 +37,7 @@ Use absolute paths. Run one render at a time: they share the single hardware enc
 
 Every frame must be a pure function of time. FrameVelo seeks the page through the first of these it finds:
 
-1. `window.__framevelo = { seek(t), duration, fps }`. `seek` may return a promise.
+1. `window.__framevelo = { seek(t), duration, fps, audio }`. `seek` may return a promise; `audio` is a soundtrack URL to mux.
 2. `window.__seek(t)`, with an optional `window.__duration`.
 3. A paused GSAP timeline on `window.__timelines.main` (or the first key).
 
@@ -72,7 +72,7 @@ Every frame must be a pure function of time. FrameVelo seeks the page through th
 | Replace the soundtrack | `audio: "/abs/music.m4a"` |
 | Capture one element | `selector: "#stage"` |
 | Transparent DOM over a color | `background: "#000"` |
-| code-video skill not found | `mounts: {"/@skill/": "/abs/path/to/code-video"}` |
+| Page loads files from outside its folder | `mounts: {"/vendor/": "/abs/path/to/vendor"}` |
 | HyperFrames project as a plain page | `hyperframes: false` |
 
 ## When it fails

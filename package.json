@@ -1,6 +1,6 @@
 {
   "name": "framevelo",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A rendering accelerator for code-driven videos.",
   "keywords": [
     "video",
@@ -43,8 +43,11 @@
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "node --test --disable-warning=ExperimentalWarning test/*.test.ts",
-    "test:integration": "FRAMEVELO_INTEGRATION=1 node --test --disable-warning=ExperimentalWarning test/*.test.ts",
+    "test:integration": "FRAMEVELO_INTEGRATION=1 node --test --test-concurrency=1 --test-timeout=300000 --disable-warning=ExperimentalWarning test/*.test.ts",
     "framevelo": "node --disable-warning=ExperimentalWarning src/cli.ts",
+    "bench": "node --disable-warning=ExperimentalWarning bench/run.ts",
+    "bench:report": "node --disable-warning=ExperimentalWarning bench/report.ts",
+    "cover": "node --disable-warning=ExperimentalWarning scripts/cover.ts",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
@@ -52,8 +55,8 @@
     "puppeteer-core": "25.13.0"
   },
   "peerDependencies": {
-    "@hyperframes/producer": ">=0.8.186 <0.9.0",
-    "@hyperframes/engine": ">=0.8.186 <0.9.0"
+    "@hyperframes/engine": ">=0.8.186 <0.9.0",
+    "@hyperframes/producer": ">=0.8.186 <0.9.0"
   },
   "peerDependenciesMeta": {
     "@hyperframes/producer": {
@@ -67,6 +70,7 @@
     "@hyperframes/engine": "0.8.186",
     "@hyperframes/producer": "0.8.186",
     "@types/node": "22.20.5",
+    "gsap": "3.14.2",
     "typescript": "7.0.2"
   }
 }

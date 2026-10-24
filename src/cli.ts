@@ -22,9 +22,9 @@ Usage:
                                        agents over the Model Context Protocol (stdio)
   framevelo --version
 
-Inputs: a HyperFrames project (compiled with @hyperframes/producer when installed), a code-video
-composition (defineComposition), or any page that is seekable through window.__framevelo =
-{ seek(t), duration }, window.__seek(t), or a paused GSAP timeline on window.__timelines.main.
+Inputs: a HyperFrames project (compiled with @hyperframes/producer when installed), or any page
+that is seekable through window.__framevelo = { seek(t), duration, fps, audio }, window.__seek(t),
+or a paused GSAP timeline on window.__timelines.main.
 
 Render options:
   -o, --output <file>     Output .mp4 (default: <input name>.mp4)
@@ -57,7 +57,7 @@ Render options:
       --no-hyperframes    Render a HyperFrames project as a plain page instead of compiling it
                           with the official HyperFrames pipeline (@hyperframes/producer)
       --mount <p>=<dir>   Serve another directory under a URL prefix (repeatable), e.g.
-                          --mount /@skill/=~/.claude/skills/code-video
+                          --mount /vendor/=~/shared/vendor
       --chrome <path>     Chrome binary (default: FRAMEVELO_CHROME, newest chrome-headless-shell 151+
                           in the FrameVelo/HyperFrames/Puppeteer caches, then installed Chrome)
       --json              Print the result as JSON
@@ -180,7 +180,7 @@ async function renderCommand(argv: string[]): Promise<void> {
     const mounts: Record<string, string> = {};
     for (const spec of values.mount) {
       const eq = spec.indexOf("=");
-      if (eq <= 0) throw new Error(`Invalid --mount "${spec}"; use PREFIX=DIR such as /@skill/=./skill.`);
+      if (eq <= 0) throw new Error(`Invalid --mount "${spec}"; use PREFIX=DIR such as /vendor/=./vendor.`);
       const dir = spec.slice(eq + 1).replace(/^~(?=$|\/)/, process.env.HOME ?? "~");
       mounts[spec.slice(0, eq)] = path.resolve(dir);
     }

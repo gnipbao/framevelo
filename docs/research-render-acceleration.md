@@ -3,7 +3,7 @@
 - 日期：2026-10-23
 - 目标：参照 [HyperFrames-RenderKit](https://github.com/xiaotianfotos/HyperFrames-RenderKit)，在 **macOS / Apple M3** 上做一个“代码写成的视频”（HyperFrames、canvas/three.js 等按时间求值的网页）渲染加速工具，**尽量压低耗时、CPU 和内存**。
 - 测试机：MacBook Pro M3 Pro（5P + 6E 核，18 GB 统一内存，1 个视频编码引擎）、macOS 27.0.1、Google Chrome 155.0.8059.85、HyperFrames CLI 0.8.186、FFmpeg 7.0.2。
-- 所有数字均在本机实测，脚本在 [`research/bench/`](../research/bench/)，可复现。
+- 所有数字均在本机实测。当时的原型脚本已从仓库移除，可在首个提交中查看：[`research/bench/`](https://github.com/gnipbao/framevelo/tree/8fd606f/research/bench)。FrameVelo 本身的基准测试见 [docs/benchmarks.md](benchmarks.md)。
 
 ---
 
@@ -26,7 +26,7 @@
 
 - 1080p：比官方默认 **快 2.7 倍、CPU 降到 1/4.5、内存少 45%**；画质与官方 `--gpu` 持平（PSNR 42.9 vs 42.5 dB）。
 - 4K：**快 4.9 倍、CPU 降到 1/12.8、内存减半**；PSNR 46.4 dB / SSIM 0.993。
-- 纯 canvas 合成（`code-video` 这类 Canvas 2D 按时间求值的形态）：**170 fps vs 17 fps，约 10 倍**，CPU 从 60 s 降到 7.6 s。
+- 纯 canvas 合成（Canvas 2D 按时间求值的形态）：**170 fps vs 17 fps，约 10 倍**，CPU 从 60 s 降到 7.6 s。
 
 主要风险：`drawElementImage`（HTML-in-Canvas）仍是 Origin Trial（延长到 Chrome 160），API 在 Chrome 155 改过名。对策：钉死 Chrome for Testing 版本，加一层 API 适配，按区间抽帧自校验，失败的区间回退到「截图 + VideoToolbox」。
 
@@ -69,7 +69,7 @@
 
 ### 3.1 端到端：同一 GSAP 合成，官方 CLI vs 原型
 
-合成：80 张带圆角、渐变、`box-shadow` 模糊阴影的卡片 + 3 个 520 px 径向渐变光斑 + 逐字动画标题 + 文本，全部由一条暂停的 GSAP 时间线驱动（`research/bench/hfproj/index.html`，通过 `hyperframes lint`）。
+合成：80 张带圆角、渐变、`box-shadow` 模糊阴影的卡片 + 3 个 520 px 径向渐变光斑 + 逐字动画标题 + 文本，全部由一条暂停的 GSAP 时间线驱动（现为 [`bench/fixtures/gsap-showcase`](../bench/fixtures/gsap-showcase/index.html)，通过 `hyperframes lint`）。
 
 | 方案 | 墙钟 | CPU | 峰值内存 | 文件 | PSNR / SSIM |
 |---|---:|---:|---:|---:|---|
@@ -102,16 +102,16 @@ CPU 按进程分布：
 | 截图 → x264 | **26.2 s** | 14.4 s | 8.7 s | 4.3 s | 1.2 s |
 | drawElement → WebCodecs | 0 s | 6.4 s | 2.0 s | 4.4 s | 0.6 s |
 
-### 3.3 纯 canvas 合成（code-video 形态）
+### 3.3 纯 canvas 合成
 
 `www/canvas.html`：1500 个粒子 + 40 个带阴影旋转方块 + 渐变背景 + 文字，Canvas 2D 按时间纯函数绘制。
 
 | 管线 | fps | CPU | 峰值内存 | 传输量 |
 |---|---:|---:|---:|---:|
-| `toDataURL('image/png')` → ffmpeg → x264 medium（≈ 常见 PNG 管道渲染脚本，如 `code-video` 的 `render.mjs`，subframes=1） | 17.3 | 60.4 s | 2668 MB | 489 MB |
+| `toDataURL('image/png')` → ffmpeg → x264 medium（≈ 常见的 PNG 管道渲染脚本，subframes=1） | 17.3 | 60.4 s | 2668 MB | 489 MB |
 | **canvas → WebCodecs（VideoToolbox）** | **170.3** | **7.6 s** | **1502 MB** | 20.1 MB |
 
-`code-video` 默认 `--subframes 3`（3 次采样合成运动模糊），现有路径的成本还要再乘 3 并加上 ffmpeg `tmix`；改为在 GPU 上累加子帧后只编码一次，收益会更大（未实测）。
+若用 3 个子帧合成运动模糊，现有路径的成本还要再乘 3 并加上 ffmpeg `tmix`；改为在 GPU 上累加子帧后只编码一次，收益会更大（未实测）。
 
 ### 3.4 编码器本身（ffmpeg，testsrc2 BGRA 输入，300 帧）
 
@@ -188,7 +188,7 @@ Node：封装（mediabunny 或 ffmpeg -c copy）+ 音频（复用官方 audioMix
 
 | 组件 | 做法 | 依据 |
 |---|---|---|
-| 时间驱动适配器 | HyperFrames：`window.__player.seek` / `__hf` 协议；通用：`window.__seek(t)`；code-video：canvas 纯函数 | 官方 engine `frameCapture.ts`、RenderKit `full-canvas-renderer.js` |
+| 时间驱动适配器 | HyperFrames：`window.__player.seek` / `__hf` 协议；通用：`window.__seek(t)`；canvas 纯函数 | 官方 engine `frameCapture.ts`、RenderKit `full-canvas-renderer.js` |
 | 采集 | `<canvas layoutsubtree>` 包住合成根节点，`requestPaint` + `paint` 事件里 `drawElementImage`；WebGL/WebGPU 子画布按官方 `instrumentAcceleratedCanvases` 的做法手动合成 | 原型 `www/capture.js`、官方 `drawElementService.ts` |
 | 编码 | WebCodecs `VideoEncoder`，`avc1.640033` / `hvc1`，`hardwareAcceleration: 'prefer-hardware'`，`latencyMode: 'quality'`（`realtime` 实测反而更慢：34.6 vs 45.5 fps），队列 ≤ 4 | §3.2 参数扫描 |
 | 传输 | 压缩码流按约 2 MB 批量走 CDP binding；正式版可换 WebSocket 二进制帧，省掉 base64 | 原型实测 node 进程 CPU < 1 s |
@@ -200,7 +200,7 @@ Node：封装（mediabunny 或 ffmpeg -c copy）+ 音频（复用官方 audioMix
 
 - **O1 静帧 / 保持帧去重**：时间线在相邻帧间没有属性变化时跳过 paint，重复编码上一帧（或打 duplicate 标记）。官方已有 `staticFrameDedup`，可以参考。
 - **O2 图层光栅缓存**：只做 transform/opacity 动画的元素（GSAP 最常见的情况），用 `captureElementImage()` 光栅化一次，之后每帧用 canvas 变换合成，避免重放阴影 / 模糊。在阴影很重的合成上，上限约 3 倍（45 → 150 fps）。需要配合抽帧校验，因为层叠上下文和混合模式有保真风险。
-- **O3 GPU 运动模糊**（code-video）：子帧在 canvas 里用 `globalAlpha` 或 WebGL 累加后只编码一次，取代「N 张 PNG + ffmpeg tmix」。
+- **O3 GPU 运动模糊**：子帧在 canvas 里用 `globalAlpha` 或 WebGL 累加后只编码一次，取代「N 张 PNG + ffmpeg tmix」。
 - **O4 视频素材**：页面内用 `VideoDecoder`（VideoToolbox 硬解）按精确 PTS 取帧（RenderKit 的做法），取代官方用 ffmpeg 抽帧再注入。**未实测**，这是带视频素材的项目里最大的未知数。
 - **O5 HEVC 输出**：同画质下文件更小，编码速度与 H.264 相同（§3.4）。
 
@@ -227,14 +227,16 @@ Node：封装（mediabunny 或 ffmpeg -c copy）+ 音频（复用官方 audioMix
 
 | 阶段 | 内容 | 估时 |
 |---|---|---|
-| M0 | CLI MVP：通用可 seek 页面 + 纯 canvas 合成 → MP4（WebCodecs + 封装 + 音频）；接入 `code-video` 的 `render.mjs`（加 `--capture webcodecs`） | 2–3 天 |
+| M0 | CLI MVP：通用可 seek 页面 + 纯 canvas 合成 → MP4（WebCodecs + 封装 + 音频） | 2–3 天 |
 | M1 | HyperFrames 适配：复用官方编译产物（字体、子合成）、`__player.seek`、音频混音；与官方输出做 PSNR 对齐测试 | 1–2 周 |
 | M2 | 规划器 + 抽帧自校验 + 区间回退（screenshot-vt）；色彩元数据；60 fps / 4K / HEVC；有界资源与原子落盘 | 1–2 周 |
 | M3 | 视频素材走 VideoDecoder；静帧去重；图层光栅缓存；GPU 运动模糊 | 2 周以上 |
 
-M0 的核心代码基本就是 `research/bench/www/capture.js` 里的 `__renderWebCodecs` 加上 `bench.mjs` 的 de-wc 分支，风险最低，建议先做，用来验证真实项目的收益。
+M0 的核心代码基本就是原型 `www/capture.js` 里的 `__renderWebCodecs` 加上 `bench.mjs` 的 de-wc 分支，风险最低，建议先做，用来验证真实项目的收益。
 
 ## 9. 复现
+
+原型脚本在首个提交里（[`research/bench/`](https://github.com/gnipbao/framevelo/tree/8fd606f/research/bench)），检出该提交后：
 
 ```bash
 cd research/bench && npm i && npm run setup

@@ -3,7 +3,7 @@
 // erasable TypeScript syntax.
 
 export type CaptureMode = "auto" | "canvas" | "dom";
-export type TimeDriver = "framevelo" | "hyperframes" | "code-video" | "seek" | "gsap";
+export type TimeDriver = "framevelo" | "hyperframes" | "seek" | "gsap";
 
 export interface PagePrepareOptions {
   mode: CaptureMode;
@@ -24,7 +24,7 @@ export interface PagePrepareResult {
   canvasHeight?: number;
   duration?: number;
   fps?: number;
-  /** Soundtrack URL the composition declares (code-video `defineComposition({ audio })`). */
+  /** Soundtrack URL the page declares (`window.__framevelo.audio`), resolved against the page. */
   audio?: string;
   chromeHasDrawElement: boolean;
   /** DOM mode only: whether drawElementImage capture is set up (otherwise only screenshots work). */
@@ -150,7 +150,7 @@ export function pageBootstrap(options: { seedRandom?: boolean } = {}): void {
     clearTimeout: window.clearTimeout.bind(window),
   };
   if (options.seedRandom) {
-    // Deterministic Math.random (Mulberry32, the seed code-video's renderer uses): renders repeat.
+    // Deterministic Math.random (Mulberry32): renders repeat.
     let a = 0x9e3779b9;
     Math.random = () => {
       a = (a + 0x6d2b79f5) >>> 0;
@@ -187,7 +187,7 @@ export function pageInstallRuntime(): void {
     __fv?: unknown;
     __fvClock?: { now: () => number; setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout };
     __fvAccelCanvases?: HTMLCanvasElement[];
-    __framevelo?: { seek?: Seek; duration?: number; fps?: number };
+    __framevelo?: { seek?: Seek; duration?: number; fps?: number; audio?: string };
     __hf?: { seek?: (t: number) => unknown; duration?: number; buildReady?: Record<string, unknown> };
     __hfWaitForSeekCompletion?: () => Promise<void>;
     __hf_page_composite_pending?: boolean;
@@ -196,8 +196,6 @@ export function pageInstallRuntime(): void {
     __seek?: Seek;
     __duration?: number;
     __timelines?: Record<string, Timeline | undefined>;
-    __comp?: { duration?: number; fps?: number; ready?: boolean; error?: unknown; audio?: string | null };
-    seek?: Seek;
     __fvChunk(base64: string): Promise<void>;
     __fvProgress(done: number): void;
   };
@@ -331,7 +329,13 @@ export function pageInstallRuntime(): void {
       const fv = w.__framevelo;
       if (fv && typeof fv.seek === "function") {
         const seek = fv.seek.bind(fv);
-        return { driver: "framevelo", seek: (t) => settle(seek(t)), duration: fv.duration, fps: fv.fps };
+        return {
+          driver: "framevelo",
+          seek: (t) => settle(seek(t)),
+          duration: fv.duration,
+          fps: fv.fps,
+          ...(typeof fv.audio === "string" && fv.audio ? { audio: new URL(fv.audio, location.href).href } : {}),
+        };
       }
       const hf = w.__hf;
       if (hf && typeof hf.seek === "function" && Number(hf.duration) > 0) {
@@ -347,20 +351,6 @@ export function pageInstallRuntime(): void {
         };
       }
       if (options.expectHyperFrames) return null;
-      // code-video: defineComposition() exposes window.seek(t) and window.__comp once setup ran.
-      const comp = w.__comp;
-      if (comp && typeof w.seek === "function") {
-        if (comp.error) throw new Error(`The composition failed to set up: ${String(comp.error)}`);
-        if (!comp.ready) return null;
-        const seek = w.seek;
-        return {
-          driver: "code-video",
-          seek: (t) => settle(seek(t)),
-          ...(comp.duration ? { duration: comp.duration } : {}),
-          ...(comp.fps ? { fps: comp.fps } : {}),
-          ...(comp.audio ? { audio: new URL(comp.audio, location.href).href } : {}),
-        };
-      }
       if (typeof w.__seek === "function") {
         const seek = w.__seek;
         return { driver: "seek", seek: (t) => settle(seek(t)), duration: w.__duration };
