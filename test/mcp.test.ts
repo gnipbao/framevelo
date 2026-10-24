@@ -29,7 +29,7 @@ test("renderOptionsFromArgs maps and checks tool arguments", () => {
     quality: "draft",
     bitrate: "12M",
     hyperframes: false,
-    mounts: { "/@skill/": "/skills/code-video" },
+    mounts: { "/vendor/": "/shared/vendor" },
   });
   assert.equal(options.output, "/out/a.mp4");
   assert.equal(options.frames, 30);
@@ -37,7 +37,7 @@ test("renderOptionsFromArgs maps and checks tool arguments", () => {
   assert.equal(options.quality, "draft");
   assert.equal(options.bitrate, 12_000_000);
   assert.equal(options.hyperframes, "off");
-  assert.deepEqual(options.mounts, { "/@skill/": "/skills/code-video" });
+  assert.deepEqual(options.mounts, { "/vendor/": "/shared/vendor" });
   assert.equal(renderOptionsFromArgs({ input: "/work/promo" }).output, "/work/promo.mp4");
   assert.throws(() => renderOptionsFromArgs({}), /input is required/);
   assert.throws(() => renderOptionsFromArgs({ input: "/a", frames: 1.5 }), /frames must be an integer/);

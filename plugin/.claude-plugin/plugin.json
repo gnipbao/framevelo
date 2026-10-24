@@ -1,6 +1,6 @@
 {
   "name": "framevelo",
-  "description": "Render HyperFrames projects, code-video compositions and seekable HTML pages to MP4 on the GPU and the hardware encoder: MCP tools plus a skill.",
+  "description": "Render HyperFrames projects and seekable HTML/Canvas pages to MP4 on the GPU and the hardware encoder: MCP tools plus a skill.",
   "version": "0.3.0",
   "author": { "name": "gnipbao", "url": "https://github.com/gnipbao" },
   "homepage": "https://github.com/gnipbao/framevelo",

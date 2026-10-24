@@ -10,7 +10,7 @@ import { render, type RenderOptions, type RenderResult } from "./render.ts";
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS = `FrameVelo renders code-driven videos to MP4 on the GPU and the hardware encoder.
-- Inputs: a HyperFrames project, a code-video composition, or an HTML page that is a pure function of
+- Inputs: a HyperFrames project, or an HTML page that is a pure function of
   time (window.__framevelo = { seek(t), duration }, window.__seek(t), or a paused GSAP timeline on
   window.__timelines.main). Pages driven by requestAnimationFrame loops or wall-clock time cannot be rendered.
 - Use absolute paths. Renders run one at a time.
@@ -22,7 +22,7 @@ const TOOLS = [
     name: "render",
     title: "Render to MP4",
     description:
-      "Render a code-driven video to MP4: a HyperFrames project, a code-video composition, or any HTML page that is a pure function of time. " +
+      "Render a code-driven video to MP4: a HyperFrames project, or any HTML page that is a pure function of time. " +
       "Returns the output path, frame count, size, timings and warnings. Duration, fps and size default to what the page declares.",
     inputSchema: {
       type: "object",
@@ -56,7 +56,7 @@ const TOOLS = [
         mounts: {
           type: "object",
           additionalProperties: { type: "string" },
-          description: 'Extra directories to serve, by URL prefix, e.g. {"/@skill/": "/path/to/skill"}.',
+          description: 'Extra directories to serve, by URL prefix, e.g. {"/vendor/": "/path/to/vendor"}.',
         },
       },
       required: ["input"],
@@ -165,7 +165,7 @@ export function renderOptionsFromArgs(args: Json): RenderOptions {
   if (args.mounts !== undefined) {
     const mounts = args.mounts;
     if (!mounts || typeof mounts !== "object" || Array.isArray(mounts) || Object.values(mounts).some((dir) => typeof dir !== "string")) {
-      throw new Error('mounts must map URL prefixes to directories, e.g. {"/@skill/": "/path/to/skill"}.');
+      throw new Error('mounts must map URL prefixes to directories, e.g. {"/vendor/": "/path/to/vendor"}.');
     }
     options.mounts = Object.fromEntries(Object.entries(mounts as Record<string, string>).map(([prefix, dir]) => [prefix, path.resolve(dir)]));
   }
