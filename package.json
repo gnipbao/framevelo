@@ -43,7 +43,7 @@
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "node --test --disable-warning=ExperimentalWarning test/*.test.ts",
-    "test:integration": "FRAMEVELO_INTEGRATION=1 node --test --disable-warning=ExperimentalWarning test/*.test.ts",
+    "test:integration": "FRAMEVELO_INTEGRATION=1 node --test --test-concurrency=1 --test-timeout=300000 --disable-warning=ExperimentalWarning test/*.test.ts",
     "framevelo": "node --disable-warning=ExperimentalWarning src/cli.ts",
     "bench": "node --disable-warning=ExperimentalWarning bench/run.ts",
     "bench:report": "node --disable-warning=ExperimentalWarning bench/report.ts",
