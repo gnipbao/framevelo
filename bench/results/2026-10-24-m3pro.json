@@ -1,0 +1,789 @@
+{
+  "version": 1,
+  "date": "2026-10-24T14:49:53.485Z",
+  "framevelo": {
+    "version": "0.4.0",
+    "commit": "c055ded"
+  },
+  "hyperframes": "0.8.186",
+  "machine": {
+    "model": "Mac15,6",
+    "cpu": "Apple M3 Pro",
+    "cores": 11,
+    "memoryGb": 18,
+    "os": "macOS 27.0.1",
+    "node": "v22.23.2",
+    "chrome": "chrome-headless-shell 154.0.8037.57",
+    "ffmpeg": "ffmpeg version 7.0.2"
+  },
+  "repeats": 3,
+  "loadAverage": {
+    "start": 3.9,
+    "end": 6.2
+  },
+  "gsap": [
+    {
+      "resolution": "1080p",
+      "renderer": "official",
+      "wallS": 15.89,
+      "cpuS": 62.6,
+      "peakMb": 2904,
+      "runs": [
+        {
+          "wallS": 16.39,
+          "cpuS": 62.9,
+          "peakMb": 2588
+        },
+        {
+          "wallS": 15.31,
+          "cpuS": 62.3,
+          "peakMb": 2894
+        },
+        {
+          "wallS": 15.89,
+          "cpuS": 62.6,
+          "peakMb": 2904
+        }
+      ],
+      "frames": 300,
+      "mb": 14.3
+    },
+    {
+      "resolution": "1080p",
+      "renderer": "official-gpu",
+      "wallS": 15.3,
+      "cpuS": 29.7,
+      "peakMb": 2254,
+      "runs": [
+        {
+          "wallS": 15.55,
+          "cpuS": 30,
+          "peakMb": 2062
+        },
+        {
+          "wallS": 15.3,
+          "cpuS": 29.7,
+          "peakMb": 2254
+        },
+        {
+          "wallS": 15.07,
+          "cpuS": 29.8,
+          "peakMb": 2219
+        }
+      ],
+      "frames": 300,
+      "mb": 12.7,
+      "psnrAvg": 45.2,
+      "psnrMin": 43.5
+    },
+    {
+      "resolution": "1080p",
+      "renderer": "framevelo",
+      "wallS": 7.97,
+      "cpuS": 7.8,
+      "peakMb": 856,
+      "runs": [
+        {
+          "wallS": 7.98,
+          "cpuS": 7.9,
+          "peakMb": 853
+        },
+        {
+          "wallS": 7.95,
+          "cpuS": 7.8,
+          "peakMb": 848
+        },
+        {
+          "wallS": 7.97,
+          "cpuS": 7.8,
+          "peakMb": 856
+        }
+      ],
+      "frames": 300,
+      "mb": 15.5,
+      "psnrAvg": 45.9,
+      "psnrMin": 44.6
+    },
+    {
+      "resolution": "4k",
+      "renderer": "official",
+      "wallS": 34.02,
+      "cpuS": 210.2,
+      "peakMb": 3998,
+      "runs": [
+        {
+          "wallS": 33.69,
+          "cpuS": 209.6,
+          "peakMb": 4113
+        },
+        {
+          "wallS": 34.54,
+          "cpuS": 210,
+          "peakMb": 4107
+        },
+        {
+          "wallS": 34.02,
+          "cpuS": 210.2,
+          "peakMb": 3998
+        }
+      ],
+      "frames": 300,
+      "mb": 37
+    },
+    {
+      "resolution": "4k",
+      "renderer": "official-gpu",
+      "wallS": 31.82,
+      "cpuS": 90.1,
+      "peakMb": 2589,
+      "runs": [
+        {
+          "wallS": 32.45,
+          "cpuS": 89.6,
+          "peakMb": 2680
+        },
+        {
+          "wallS": 31.82,
+          "cpuS": 90.1,
+          "peakMb": 2589
+        },
+        {
+          "wallS": 31.6,
+          "cpuS": 88.7,
+          "peakMb": 2800
+        }
+      ],
+      "frames": 300,
+      "mb": 12.7,
+      "psnrAvg": 43.9,
+      "psnrMin": 41.8
+    },
+    {
+      "resolution": "4k",
+      "renderer": "framevelo",
+      "wallS": 9.07,
+      "cpuS": 11.2,
+      "peakMb": 969,
+      "runs": [
+        {
+          "wallS": 9.12,
+          "cpuS": 11.2,
+          "peakMb": 999
+        },
+        {
+          "wallS": 9.07,
+          "cpuS": 11.2,
+          "peakMb": 969
+        },
+        {
+          "wallS": 9.05,
+          "cpuS": 10.9,
+          "peakMb": 985
+        }
+      ],
+      "frames": 300,
+      "mb": 56,
+      "psnrAvg": 48.8,
+      "psnrMin": 47.8
+    }
+  ],
+  "fixtures": [
+    {
+      "name": "nested-subcomp-depth-3",
+      "official": {
+        "ok": true,
+        "wallS": 12.02,
+        "cpuS": 6.6,
+        "peakMb": 1304
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 2.58,
+        "cpuS": 2,
+        "peakMb": 717
+      },
+      "frames": 60,
+      "officialFrames": 60,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 49.7,
+      "psnrMin": 49.3
+    },
+    {
+      "name": "css-spinner-render-compat",
+      "official": {
+        "ok": true,
+        "wallS": 6.86,
+        "cpuS": 9.8,
+        "peakMb": 1893
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 1.84,
+        "cpuS": 2.2,
+        "peakMb": 726
+      },
+      "frames": 150,
+      "officialFrames": 150,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 55.7,
+      "psnrMin": 54.9
+    },
+    {
+      "name": "raf-ball-render-compat",
+      "official": {
+        "ok": true,
+        "wallS": 6.59,
+        "cpuS": 10.7,
+        "peakMb": 1857
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 1.79,
+        "cpuS": 2.2,
+        "peakMb": 761
+      },
+      "frames": 150,
+      "officialFrames": 150,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 62,
+      "psnrMin": 60
+    },
+    {
+      "name": "gsap-letters-render-compat",
+      "official": {
+        "ok": true,
+        "wallS": 10.79,
+        "cpuS": 12.1,
+        "peakMb": 2319
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 2.56,
+        "cpuS": 2.1,
+        "peakMb": 673
+      },
+      "frames": 120,
+      "officialFrames": 120,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 66.4,
+      "psnrMin": 57.6
+    },
+    {
+      "name": "many-cuts",
+      "official": {
+        "ok": true,
+        "wallS": 22.71,
+        "cpuS": 17.1,
+        "peakMb": 2369
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 9.98,
+        "cpuS": 6.8,
+        "peakMb": 889
+      },
+      "frames": 168,
+      "officialFrames": 168,
+      "audio": true,
+      "officialAudio": true,
+      "psnrAvg": 60.4,
+      "psnrMin": 51.4
+    },
+    {
+      "name": "speed-ramp",
+      "official": {
+        "ok": true,
+        "wallS": 8.23,
+        "cpuS": 6.2,
+        "peakMb": 1865
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 4.69,
+        "cpuS": 5.2,
+        "peakMb": 738
+      },
+      "frames": 120,
+      "officialFrames": 120,
+      "audio": true,
+      "officialAudio": true,
+      "psnrAvg": 47.6,
+      "psnrMin": 44.9
+    },
+    {
+      "name": "animejs-adapter",
+      "official": {
+        "ok": true,
+        "wallS": 11.21,
+        "cpuS": 13,
+        "peakMb": 1924
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 5.27,
+        "cpuS": 2.8,
+        "peakMb": 729
+      },
+      "frames": 180,
+      "officialFrames": 180,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 49.7,
+      "psnrMin": 39.5
+    },
+    {
+      "name": "html-dir-rtl",
+      "official": {
+        "ok": true,
+        "wallS": 8.13,
+        "cpuS": 3.6,
+        "peakMb": 744
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 2.73,
+        "cpuS": 2,
+        "peakMb": 767
+      },
+      "frames": 60,
+      "officialFrames": 60,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 48.5,
+      "psnrMin": 46.4
+    },
+    {
+      "name": "transparency-regression",
+      "official": {
+        "ok": true,
+        "wallS": 5.88,
+        "cpuS": 2.1,
+        "peakMb": 674
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 0.95,
+        "cpuS": 1.4,
+        "peakMb": 651
+      },
+      "frames": 30,
+      "officialFrames": 30,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 55.1,
+      "psnrMin": 54.9
+    },
+    {
+      "name": "style-1-prod",
+      "official": {
+        "ok": true,
+        "wallS": 32.53,
+        "cpuS": 59.1,
+        "peakMb": 2527
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 32.77,
+        "cpuS": 45.6,
+        "peakMb": 1819
+      },
+      "frames": 510,
+      "officialFrames": 510,
+      "audio": true,
+      "officialAudio": true,
+      "psnrAvg": 50.7,
+      "psnrMin": 48.1
+    },
+    {
+      "name": "style-5-prod",
+      "official": {
+        "ok": true,
+        "wallS": 34.24,
+        "cpuS": 72.7,
+        "peakMb": 2647
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 32.02,
+        "cpuS": 21.4,
+        "peakMb": 1730
+      },
+      "frames": 572,
+      "officialFrames": 572,
+      "audio": true,
+      "officialAudio": true,
+      "psnrAvg": 50.8,
+      "psnrMin": 46.9
+    },
+    {
+      "name": "sub-composition-video",
+      "official": {
+        "ok": true,
+        "wallS": 45.13,
+        "cpuS": 83.1,
+        "peakMb": 2636
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 24.45,
+        "cpuS": 22.8,
+        "peakMb": 1512
+      },
+      "frames": 390,
+      "officialFrames": 390,
+      "audio": true,
+      "officialAudio": true,
+      "psnrAvg": 49.3,
+      "psnrMin": 48.4
+    },
+    {
+      "name": "typegpu-adapter",
+      "official": {
+        "ok": true,
+        "wallS": 10.92,
+        "cpuS": 18.7,
+        "peakMb": 2262
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 7.1,
+        "cpuS": 4,
+        "peakMb": 755
+      },
+      "frames": 180,
+      "officialFrames": 180,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 52.9,
+      "psnrMin": 51.1
+    },
+    {
+      "name": "webgl-video-texture-render-compat",
+      "official": {
+        "ok": true,
+        "wallS": 51.83,
+        "cpuS": 7.8,
+        "peakMb": 1204
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 48.41,
+        "cpuS": 4.5,
+        "peakMb": 697
+      },
+      "frames": 60,
+      "officialFrames": 60,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 45.8,
+      "psnrMin": 42.3
+    },
+    {
+      "name": "iframe-render-compat",
+      "official": {
+        "ok": true,
+        "wallS": 7.41,
+        "cpuS": 12.7,
+        "peakMb": 1838
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 1.93,
+        "cpuS": 2.3,
+        "peakMb": 714
+      },
+      "frames": 150,
+      "officialFrames": 150,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 61.4,
+      "psnrMin": 56.1
+    },
+    {
+      "name": "pip-video-late-host",
+      "official": {
+        "ok": true,
+        "wallS": 17.51,
+        "cpuS": 31.2,
+        "peakMb": 2244
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 11.96,
+        "cpuS": 6.7,
+        "peakMb": 1116
+      },
+      "frames": 180,
+      "officialFrames": 180,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 51.7,
+      "psnrMin": 47.7
+    },
+    {
+      "name": "variables-prod",
+      "official": {
+        "ok": true,
+        "wallS": 8.31,
+        "cpuS": 8.2,
+        "peakMb": 1537
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 3.84,
+        "cpuS": 2.5,
+        "peakMb": 702
+      },
+      "frames": 90,
+      "officialFrames": 90,
+      "audio": true,
+      "officialAudio": true,
+      "psnrAvg": 62.2,
+      "psnrMin": 53.1
+    },
+    {
+      "name": "hf2550-video-subcomposition-ghost",
+      "official": {
+        "ok": true,
+        "wallS": 41.91,
+        "cpuS": 157.6,
+        "peakMb": 2760
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 31.39,
+        "cpuS": 133.7,
+        "peakMb": 1746
+      },
+      "frames": 1516,
+      "officialFrames": 1516,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 50.9,
+      "psnrMin": 46
+    },
+    {
+      "name": "nested-sequential-video-local-start",
+      "official": {
+        "ok": true,
+        "wallS": 7.9,
+        "cpuS": 4.4,
+        "peakMb": 633
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 2.81,
+        "cpuS": 5.2,
+        "peakMb": 714
+      },
+      "frames": 60,
+      "officialFrames": 60,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 100,
+      "psnrMin": 100
+    },
+    {
+      "name": "timed-descendant-visibility",
+      "official": {
+        "ok": true,
+        "wallS": 7.27,
+        "cpuS": 6.6,
+        "peakMb": 1527
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 1.9,
+        "cpuS": 2,
+        "peakMb": 728
+      },
+      "frames": 270,
+      "officialFrames": 270,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 53.6,
+      "psnrMin": 41.7
+    },
+    {
+      "name": "vignelli-stacking",
+      "official": {
+        "ok": true,
+        "wallS": 21.25,
+        "cpuS": 44.6,
+        "peakMb": 2394
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 14.59,
+        "cpuS": 10.3,
+        "peakMb": 1173
+      },
+      "frames": 308,
+      "officialFrames": 308,
+      "audio": true,
+      "officialAudio": true,
+      "psnrAvg": 52.2,
+      "psnrMin": 48.5
+    },
+    {
+      "name": "page-side-shader-compositor-render-compat",
+      "official": {
+        "ok": true,
+        "wallS": 10.59,
+        "cpuS": 7,
+        "peakMb": 1081
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 4.85,
+        "cpuS": 5.4,
+        "peakMb": 813
+      },
+      "frames": 60,
+      "officialFrames": 60,
+      "audio": true,
+      "officialAudio": true,
+      "psnrAvg": 37.5,
+      "psnrMin": 27.2
+    },
+    {
+      "name": "gsap-call-render-seek",
+      "official": {
+        "ok": true,
+        "wallS": 9.03,
+        "cpuS": 15.9,
+        "peakMb": 1964
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 2.88,
+        "cpuS": 2.7,
+        "peakMb": 816
+      },
+      "frames": 180,
+      "officialFrames": 180,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 53.1,
+      "psnrMin": 49.3
+    },
+    {
+      "name": "sub-comp-t0",
+      "official": {
+        "ok": true,
+        "wallS": 10.77,
+        "cpuS": 15,
+        "peakMb": 2243
+      },
+      "framevelo": {
+        "ok": true,
+        "wallS": 3.32,
+        "cpuS": 2.6,
+        "peakMb": 817
+      },
+      "frames": 180,
+      "officialFrames": 180,
+      "audio": false,
+      "officialAudio": false,
+      "psnrAvg": 58.4,
+      "psnrMin": 47.6
+    }
+  ],
+  "workers": {
+    "fixture": "hf2550-video-subcomposition-ghost",
+    "rows": [
+      {
+        "workers": 1,
+        "pages": 1,
+        "renderS": 39.2,
+        "wallS": 53.03,
+        "cpuS": 119.9,
+        "peakMb": 1287,
+        "psnrAvg": 51,
+        "psnrMin": 46.1
+      },
+      {
+        "workers": 2,
+        "pages": 2,
+        "renderS": 22.15,
+        "wallS": 34.92,
+        "cpuS": 122.4,
+        "peakMb": 1570,
+        "psnrAvg": 51,
+        "psnrMin": 46.1
+      },
+      {
+        "workers": 3,
+        "pages": 3,
+        "renderS": 16.32,
+        "wallS": 27.96,
+        "cpuS": 124.8,
+        "peakMb": 2020,
+        "psnrAvg": 50.9,
+        "psnrMin": 46
+      },
+      {
+        "workers": 4,
+        "pages": 4,
+        "renderS": 14.59,
+        "wallS": 25.81,
+        "cpuS": 132.7,
+        "peakMb": 2040,
+        "psnrAvg": 50.8,
+        "psnrMin": 46.1
+      }
+    ]
+  },
+  "browser": [
+    {
+      "browser": "chrome-headless-shell",
+      "wallS": 7.52,
+      "cpuS": 7.6,
+      "peakMb": 841,
+      "runs": [
+        {
+          "wallS": 7.52,
+          "cpuS": 7.7,
+          "peakMb": 850
+        },
+        {
+          "wallS": 7.52,
+          "cpuS": 7.6,
+          "peakMb": 841
+        },
+        {
+          "wallS": 7.52,
+          "cpuS": 7.7,
+          "peakMb": 849
+        }
+      ]
+    },
+    {
+      "browser": "chrome",
+      "wallS": 7.9,
+      "cpuS": 10.5,
+      "peakMb": 1472,
+      "runs": [
+        {
+          "wallS": 8.56,
+          "cpuS": 10.7,
+          "peakMb": 1490
+        },
+        {
+          "wallS": 7.89,
+          "cpuS": 10.2,
+          "peakMb": 1440
+        },
+        {
+          "wallS": 7.9,
+          "cpuS": 10.5,
+          "peakMb": 1472
+        }
+      ]
+    }
+  ]
+}

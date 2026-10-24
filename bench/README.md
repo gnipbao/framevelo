@@ -1,0 +1,27 @@
+# Benchmarks
+
+Measure FrameVelo against the official `hyperframes render` on your machine. Results and charts are in [docs/benchmarks.md](../docs/benchmarks.md).
+
+```bash
+npm install
+npm run bench
+npm run bench:report
+```
+
+`run.ts` writes `bench/results/<date>.json`; `report.ts` turns the newest results file into `docs/benchmarks.md` and the charts in `docs/assets/`.
+
+| Suite | What it measures |
+|---|---|
+| `gsap` | [`fixtures/gsap-showcase`](fixtures/gsap-showcase), 10 s, at 1080p and 4K: `hyperframes render`, `hyperframes render --gpu` and FrameVelo; median of `--repeats` interleaved runs (default 3) |
+| `fixtures` | The official HyperFrames regression fixtures, once each, with per-frame PSNR against the official output |
+| `workers` | A 1516-frame video fixture with `--workers 1` to `4` |
+| `browser` | FrameVelo on `chrome-headless-shell` against full Google Chrome |
+
+```bash
+node bench/run.ts --suite gsap --repeats 5 --out bench/results/gsap-only.json
+```
+
+- Every render runs alone, and wall time, CPU time and peak memory cover the whole process tree, sampled every 200 ms. Close screen recorders, video calls and other renders first: they share the GPU and the single hardware encoder. `run.ts` warns when the load average is high.
+- The regression fixtures come from the HyperFrames repository at the tag of the pinned producer version, cloned once into `~/.cache/framevelo/bench`. Pass `--fixtures <checkout>/packages/producer/tests` to use your own checkout.
+- The official CLI runs through `npx hyperframes@<version>` and is fetched before the first measurement.
+- [`parity.ts`](parity.ts) compares the two renderers on any HyperFrames projects of your own: `node bench/parity.ts <project>... [--resolution 4k]`.

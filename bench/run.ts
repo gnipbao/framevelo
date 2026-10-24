@@ -138,6 +138,9 @@ const results: Record<string, unknown> = {
 };
 const load = os.loadavg()[0]!;
 if (load > os.availableParallelism() / 4) say(`warning: load average ${load.toFixed(1)}; other work on this machine will skew the numbers`);
+// The 1-minute load average before and after the suites, for the report: other work skews the numbers.
+const loadAverage = { start: round(load, 1), end: 0 };
+results.loadAverage = loadAverage;
 
 // Fetch the official CLI once so that its first measured run does not include the download.
 check(await measure("npx", ["-y", `hyperframes@${HYPERFRAMES}`, "--version"]), "installing the official CLI");
@@ -243,6 +246,7 @@ if (suites.has("browser")) {
   }
 }
 
+loadAverage.end = round(os.loadavg()[0]!, 1);
 const out = path.resolve(values.out ?? path.join(repo, "bench", "results", `${new Date().toISOString().slice(0, 10)}.json`));
 mkdirSync(path.dirname(out), { recursive: true });
 let previous: Record<string, unknown> = {};

@@ -1,8 +1,32 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+### Removed
+
+- The code-video coupling: the `window.__comp` / `window.seek` time driver, serving the code-video
+  skill at `/@skill/` (`CODE_VIDEO_SKILL_DIR`) and the `?render=1` query. Such pages can expose
+  `window.__framevelo = { seek, duration, fps, audio }`, and `--mount` still serves extra
+  directories. A declared soundtrack is now `window.__framevelo.audio`.
+- The `research/bench` prototypes of the feasibility study (still in the first commit);
+  `scripts/parity.ts` moved to `bench/parity.ts`.
+
+### Benchmarks, docs and CI
+
+- `bench/run.ts` measures FrameVelo against `hyperframes render` (a GSAP composition at 1080p and 4K
+  against the official default and `--gpu`, the official regression fixtures fetched at the pinned
+  tag, worker scaling, headless shell against Chrome); `bench/report.ts` writes
+  [docs/benchmarks.md](docs/benchmarks.md) and light and dark charts.
+- READMEs in English, Chinese and Japanese, with a cover that is itself a FrameVelo composition
+  (`docs/assets/cover.html`).
+- CI: unit tests on Node 22 and 24, smoke tests of the built CLI and MCP server, plugin manifest
+  checks, and the integration tests on a macOS runner. Integration tests skip encoders the machine
+  lacks.
 
 ### Fixes
+
+- A page replaced after verification is now closed: it kept a second copy of the composition for the
+  whole render (about 170 MB more peak memory on a 1080p DOM page).
 
 - HyperFrames: the first frames could show the composition as it was at the last verified moment.
   Verification seeks quietly out of order, the HyperFrames runtime still runs callbacks at each
