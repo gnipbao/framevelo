@@ -25,10 +25,15 @@ test("the plugin version follows package.json", () => {
   assert.ok(plugin.description.length > 20);
 });
 
-test("the MCP server starts through the launcher script", () => {
+test("the MCP server starts through the launcher script", (t) => {
   const mcp = json("plugin/.mcp.json") as { mcpServers: Record<string, { command: string; args: string[] }> };
   assert.deepEqual(mcp.mcpServers.framevelo, { command: "sh", args: ["${CLAUDE_PLUGIN_ROOT}/scripts/mcp.sh"] });
-  execFileSync("sh", ["-n", path.join(repo, "plugin", "scripts", "mcp.sh")]);
+  try {
+    execFileSync("sh", ["-n", path.join(repo, "plugin", "scripts", "mcp.sh")]);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return t.skip("no sh on this machine");
+    throw error;
+  }
 });
 
 test("the skill has a name and a description in its front matter", () => {

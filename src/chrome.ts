@@ -6,9 +6,13 @@ import puppeteer, { type Browser } from "puppeteer-core";
 /** Lowest Chrome major with a usable `drawElementImage` (HTML-in-Canvas) for DOM capture. */
 export const MIN_DOM_CHROME_MAJOR = 151;
 
+/** Path functions for a platform, so that paths for another platform can be built and tested. */
+const pathsFor = (platform: NodeJS.Platform) => (platform === "win32" ? path.win32 : path.posix);
+
 /** Where `framevelo browser install` puts Chrome for Testing builds. */
-export function framevelCacheDir(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
-  return env.FRAMEVELO_CACHE_DIR ?? path.join(env.XDG_CACHE_HOME ?? path.join(home, ".cache"), "framevelo");
+export function framevelCacheDir(env: NodeJS.ProcessEnv = process.env, home = os.homedir(), platform = process.platform): string {
+  const p = pathsFor(platform);
+  return env.FRAMEVELO_CACHE_DIR ?? p.join(env.XDG_CACHE_HOME ?? p.join(home, ".cache"), "framevelo");
 }
 
 export interface FindChromeOptions {
@@ -22,7 +26,8 @@ export interface FindChromeOptions {
 }
 
 export function isHeadlessShell(executablePath: string): boolean {
-  return path.basename(executablePath).startsWith("chrome-headless-shell");
+  // win32.basename splits on both separators.
+  return path.win32.basename(executablePath).startsWith("chrome-headless-shell");
 }
 
 /** Version of a cache directory named like "mac_arm-152.0.7977.30". */
@@ -52,6 +57,7 @@ export function findChrome(options: FindChromeOptions = {}): string | null {
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
   const home = options.home ?? os.homedir();
+  const p = pathsFor(platform);
   const exists = options.exists ?? existsSync;
   const listDir =
     options.listDir ??
@@ -71,18 +77,18 @@ export function findChrome(options: FindChromeOptions = {}): string | null {
 
   const platformDir =
     platform === "darwin" ? (arch === "arm64" ? "mac-arm64" : "mac-x64") : platform === "win32" ? "win64" : "linux64";
-  const cacheHome = env.XDG_CACHE_HOME ?? path.join(home, ".cache");
-  const puppeteerCache = env.PUPPETEER_CACHE_DIR ?? path.join(cacheHome, "puppeteer");
+  const cacheHome = env.XDG_CACHE_HOME ?? p.join(home, ".cache");
+  const puppeteerCache = env.PUPPETEER_CACHE_DIR ?? p.join(cacheHome, "puppeteer");
 
   // Chrome for Testing cache layout: <cache>/<browser>/<platform>-<version>/<browser>-<platformDir>/<binary>
   const newestInCaches = (browser: "chrome-headless-shell" | "chrome", caches: string[], binary: string, minMajor: number) => {
     const found: Array<{ version: number[]; file: string }> = [];
     for (const cache of caches) {
-      const root = path.join(cache, browser);
+      const root = p.join(cache, browser);
       for (const dir of listDir(root)) {
         const version = buildVersion(dir);
         if ((version[0] ?? 0) < minMajor) continue;
-        const file = path.join(root, dir, `${browser}-${platformDir}`, binary);
+        const file = p.join(root, dir, `${browser}-${platformDir}`, binary);
         if (exists(file)) found.push({ version, file });
       }
     }
@@ -93,7 +99,7 @@ export function findChrome(options: FindChromeOptions = {}): string | null {
   const shellBinary = platform === "win32" ? "chrome-headless-shell.exe" : "chrome-headless-shell";
   const shell = newestInCaches(
     "chrome-headless-shell",
-    [framevelCacheDir(env, home), path.join(cacheHome, "hyperframes", "chrome"), puppeteerCache],
+    [framevelCacheDir(env, home, platform), p.join(cacheHome, "hyperframes", "chrome"), puppeteerCache],
     shellBinary,
     MIN_DOM_CHROME_MAJOR,
   );
@@ -103,15 +109,14 @@ export function findChrome(options: FindChromeOptions = {}): string | null {
     platform === "darwin"
       ? [
           "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-          path.join(home, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+          p.join(home, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
           "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
           "/Applications/Chromium.app/Contents/MacOS/Chromium",
         ]
       : platform === "win32"
-        ? [
-            path.join(env.PROGRAMFILES ?? "C:\\Program Files", "Google\\Chrome\\Application\\chrome.exe"),
-            path.join(env.LOCALAPPDATA ?? "", "Google\\Chrome\\Application\\chrome.exe"),
-          ]
+        ? [env.PROGRAMFILES ?? "C:\\Program Files", env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", env.LOCALAPPDATA ?? p.join(home, "AppData", "Local")].map(
+            (dir) => p.join(dir, "Google", "Chrome", "Application", "chrome.exe"),
+          )
         : ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
   const found = installed.find((file) => exists(file));
   if (found) return found;
@@ -122,7 +127,7 @@ export function findChrome(options: FindChromeOptions = {}): string | null {
       : platform === "win32"
         ? "chrome.exe"
         : "chrome";
-  return newestInCaches("chrome", [framevelCacheDir(env, home), puppeteerCache], cftBinary, 0);
+  return newestInCaches("chrome", [framevelCacheDir(env, home, platform), puppeteerCache], cftBinary, 0);
 }
 
 export function chromeMajor(version: string): number {

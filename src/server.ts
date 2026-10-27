@@ -37,6 +37,7 @@ export interface StaticServer {
 
 /** Resolve a URL path inside `root`, or return null when it would escape it. */
 export function resolveInsideRoot(root: string, urlPath: string): string | null {
+  root = path.resolve(root);
   let decoded: string;
   try {
     decoded = decodeURIComponent(urlPath);

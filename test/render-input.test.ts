@@ -46,10 +46,10 @@ test("videoWindows returns start/end pairs, or null when any is unknown", () => 
 
 test("localFileForUrl maps served URLs back to files in the root or a mount", () => {
   const origin = "http://127.0.0.1:5000";
-  assert.equal(localFileForUrl(`${origin}/audio/song%20one.wav`, origin, "/proj"), path.join("/proj", "audio", "song one.wav"));
-  assert.equal(localFileForUrl(`${origin}/vendor/music/bed.m4a`, origin, "/proj", { "/vendor/": "/shared" }), path.join("/shared", "music", "bed.m4a"));
+  assert.equal(localFileForUrl(`${origin}/audio/song%20one.wav`, origin, "/proj"), path.resolve("/proj", "audio", "song one.wav"));
+  assert.equal(localFileForUrl(`${origin}/vendor/music/bed.m4a`, origin, "/proj", { "/vendor/": "/shared" }), path.resolve("/shared", "music", "bed.m4a"));
   assert.equal(localFileForUrl("https://cdn.example.com/a.wav", origin, "/proj"), null);
-  assert.equal(localFileForUrl(`${origin}/../etc/passwd`, origin, "/proj"), path.join("/proj", "etc", "passwd"), "never escapes the root");
+  assert.equal(localFileForUrl(`${origin}/../etc/passwd`, origin, "/proj"), path.resolve("/proj", "etc", "passwd"), "never escapes the root");
 });
 
 test("defaultWorkers scales with cores and stays between 1 and 4", () => {

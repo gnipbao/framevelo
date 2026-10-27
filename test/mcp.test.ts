@@ -14,10 +14,11 @@ const cli = path.join(here, "..", "src", "cli.ts");
 const examples = path.join(here, "..", "examples");
 
 test("defaultOutputFor puts <name>.mp4 next to the input", () => {
-  assert.equal(defaultOutputFor("/work/promo"), "/work/promo.mp4");
-  assert.equal(defaultOutputFor("/work/promo/"), "/work/promo.mp4");
-  assert.equal(defaultOutputFor("/work/promo/index.html"), "/work/promo.mp4");
-  assert.equal(defaultOutputFor("/work/scenes/intro.html"), "/work/scenes/intro.mp4");
+  const abs = (file: string) => path.resolve(file);
+  assert.equal(defaultOutputFor("/work/promo"), abs("/work/promo.mp4"));
+  assert.equal(defaultOutputFor("/work/promo/"), abs("/work/promo.mp4"));
+  assert.equal(defaultOutputFor("/work/promo/index.html"), abs("/work/promo.mp4"));
+  assert.equal(defaultOutputFor("/work/scenes/intro.html"), abs("/work/scenes/intro.mp4"));
 });
 
 test("renderOptionsFromArgs maps and checks tool arguments", () => {
@@ -31,14 +32,14 @@ test("renderOptionsFromArgs maps and checks tool arguments", () => {
     hyperframes: false,
     mounts: { "/vendor/": "/shared/vendor" },
   });
-  assert.equal(options.output, "/out/a.mp4");
+  assert.equal(options.output, path.resolve("/out/a.mp4"));
   assert.equal(options.frames, 30);
   assert.deepEqual(options.viewport, { width: 1080, height: 1920 });
   assert.equal(options.quality, "draft");
   assert.equal(options.bitrate, 12_000_000);
   assert.equal(options.hyperframes, "off");
-  assert.deepEqual(options.mounts, { "/vendor/": "/shared/vendor" });
-  assert.equal(renderOptionsFromArgs({ input: "/work/promo" }).output, "/work/promo.mp4");
+  assert.deepEqual(options.mounts, { "/vendor/": path.resolve("/shared/vendor") });
+  assert.equal(renderOptionsFromArgs({ input: "/work/promo" }).output, path.resolve("/work/promo.mp4"));
   assert.throws(() => renderOptionsFromArgs({}), /input is required/);
   assert.throws(() => renderOptionsFromArgs({ input: "/a", frames: 1.5 }), /frames must be an integer/);
   assert.throws(() => renderOptionsFromArgs({ input: "/a", codec: "vp9" }), /codec must be one of/);
