@@ -12,7 +12,8 @@ test("proxyPath is stable for a file version and changes with it", () => {
   assert.notEqual(a, proxyPath("/media/a.mp4", 1001, 1700000000000, "/cache"));
   assert.notEqual(a, proxyPath("/media/a.mp4", 1000, 1700000001000, "/cache"));
   assert.notEqual(a, proxyPath("/media/b.mp4", 1000, 1700000000000, "/cache"));
-  assert.match(a, /^\/cache\/[0-9a-f]{20}\.mp4$/);
+  assert.equal(path.dirname(a), path.normalize("/cache"));
+  assert.match(path.basename(a), /^[0-9a-f]{20}\.mp4$/);
 });
 
 test("proxyArgs make every frame a keyframe and keep source timestamps", () => {

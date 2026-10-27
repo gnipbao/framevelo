@@ -61,6 +61,22 @@ jobs:
               if (tools.join() !== "render,doctor,install_browser") throw new Error(`unexpected tools: ${tools}`);
               console.log(lines[0].result.serverInfo, tools);
             '
+      - name: The plugin launcher installs from GitHub and serves MCP
+        if: matrix.node == 22
+        env:
+          XDG_CACHE_HOME: ${{ runner.temp }}/xdg
+          FRAMEVELO_SPEC: github:gnipbao/framevelo#${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | node plugin/scripts/mcp.mjs \
+            | node -e '
+              const lines = require("fs").readFileSync(0, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+              const tools = lines.find((m) => m.id === 2).result.tools.map((t) => t.name);
+              if (tools.join() !== "render,doctor,install_browser") throw new Error(`unexpected tools: ${tools}`);
+              console.log(lines[0].result.serverInfo, tools);
+            '
 
   integration:
     name: Integration (${{ matrix.os }}, Chrome, FFmpeg)
