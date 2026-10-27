@@ -6,7 +6,7 @@
   <a href="https://github.com/gnipbao/framevelo/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/gnipbao/framevelo/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Node 22.18+" src="https://img.shields.io/badge/node-%E2%89%A522.18-339933">
-  <img alt="macOS on Apple silicon" src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Apple%20silicon-555">
+  <img alt="macOS and Windows" src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Windows-555">
   <a href="#接入-ai-agent"><img alt="MCP server" src="https://img.shields.io/badge/MCP-server-7c5cff"></a>
 </p>
 
@@ -62,7 +62,7 @@ framevelo render examples/dom-cards -o dom-cards.mp4 --scale 2
 framevelo render examples/canvas-particles -o particles.mp4 --codec hevc --subframes 3
 ```
 
-**环境要求：**Apple 芯片的 macOS（其他平台未测试）、Node.js 22.18+、`PATH` 中有 FFmpeg 和 FFprobe、Chrome 151+（优先 `chrome-headless-shell`）。
+**环境要求：**macOS 或 Windows、Node.js 22.18+、`PATH` 中有 FFmpeg 和 FFprobe、Chrome 151+（优先 `chrome-headless-shell`）。上面的性能数据都在 Apple 芯片的 macOS 上测得。Windows 在 CI 中跑同样的集成测试：显卡带编码器时用硬件编码 H.264，否则用 Chrome 的软件编码器；HEVC 需要硬件编码器。Linux 只跑单元测试。
 
 ## 能渲染什么
 

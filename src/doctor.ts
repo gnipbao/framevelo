@@ -106,7 +106,8 @@ export async function runDoctor(options: { chromePath?: string; ffmpegPath?: str
       detail: report.drawElement ? `available (Chrome ${major})` : `unavailable; needs Chrome ${MIN_DOM_CHROME_MAJOR}+`,
     });
     const softwareGpu = /swiftshader|llvmpipe|software/i.test(report.gpu);
-    checks.push({ name: "GPU", ok: !softwareGpu, detail: report.gpu });
+    // Software rendering works (CI runners have no GPU), only more slowly.
+    checks.push({ name: "GPU", ok: !softwareGpu, optional: true, detail: softwareGpu ? `${report.gpu}; software rendering is slower` : report.gpu });
     for (const encoder of report.encoders as EncoderSupport[]) {
       checks.push({
         name: `Encoder ${encoder.label}`,

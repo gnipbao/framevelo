@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0
+
+### Windows
+
+- CI runs the unit tests and the integration tests on Windows (SwiftShader, Chrome's software H.264
+  encoder; HEVC tests skip where no encoder exists), next to macOS and Linux.
+- The Claude Code plugin's launcher is now a Node script (`plugin/scripts/mcp.mjs`) instead of `sh`,
+  so the plugin starts on Windows; it installs and starts exactly as before, and CI installs from the
+  commit through it on Linux and Windows.
+- Chrome discovery joins paths for the target platform, also looks in `Program Files (x86)`, and no
+  longer makes a relative path when `LOCALAPPDATA` is unset.
+- `resolveInsideRoot` normalizes its root; `.gitattributes` keeps LF in Windows checkouts;
+  `npm run test:integration` works in `cmd.exe` (`node --env-file`).
+- `doctor` reports a software GPU as a warning: renders work, only more slowly.
+
 ## 0.4.0
 
 ### Removed
