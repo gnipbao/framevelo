@@ -200,6 +200,17 @@ function mergeStats(all: PageRenderStats[]): PageRenderStats {
   };
 }
 
+const SCREENSHOT_TIMEOUT_MS = 60_000;
+
+/** `work`, or a rejection with `message` after `ms`. */
+function withTimeout<T>(ms: number, message: string, work: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([work, limit]).finally(() => clearTimeout(timer));
+}
+
 /** Node-side handles for driving one capture page. */
 function pageDriver(page: Page, width: number) {
   let cdp: CDPSession | undefined;
@@ -214,12 +225,13 @@ function pageDriver(page: Page, width: number) {
       await page.evaluate(() => (window as unknown as FvWindow).__fv.composite());
       cdp ??= await page.createCDPSession();
       const rect = await page.evaluate(() => (window as unknown as FvWindow).__fv.targetRect());
-      const { data } = await cdp.send("Page.captureScreenshot", {
+      // Protocol calls have no timeout (renders are long): a screenshot that never comes must fail.
+      const { data } = await withTimeout(SCREENSHOT_TIMEOUT_MS, "Chrome returned no screenshot within 60 s.", cdp.send("Page.captureScreenshot", {
         format: "jpeg",
         quality: 95,
         optimizeForSpeed: true,
         clip: { ...rect, scale: shotWidth / rect.width },
-      });
+      }));
       return data;
     },
     detach: () => cdp?.detach().catch(() => {}),

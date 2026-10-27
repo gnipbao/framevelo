@@ -13,22 +13,34 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   check:
-    name: Typecheck, unit tests, build (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    name: Typecheck, unit tests, build (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         node: [22, 24]
+        include:
+          - os: windows-latest
+            node: 22
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - name: Install FFmpeg
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
@@ -49,19 +61,43 @@ jobs:
               if (tools.join() !== "render,doctor,install_browser") throw new Error(`unexpected tools: ${tools}`);
               console.log(lines[0].result.serverInfo, tools);
             '
+      - name: The plugin launcher installs from GitHub and serves MCP
+        if: matrix.node == 22
+        env:
+          XDG_CACHE_HOME: ${{ runner.temp }}/xdg
+          FRAMEVELO_SPEC: github:gnipbao/framevelo#${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | node plugin/scripts/mcp.mjs \
+            | node -e '
+              const lines = require("fs").readFileSync(0, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+              const tools = lines.find((m) => m.id === 2).result.tools.map((t) => t.name);
+              if (tools.join() !== "render,doctor,install_browser") throw new Error(`unexpected tools: ${tools}`);
+              console.log(lines[0].result.serverInfo, tools);
+            '
 
   integration:
-    name: Integration (macOS, Chrome, FFmpeg)
-    runs-on: macos-15
+    name: Integration (${{ matrix.os }}, Chrome, FFmpeg)
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - name: Install FFmpeg
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
         run: brew install ffmpeg
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
       - run: npm ci
       - name: Install chrome-headless-shell
         run: node src/cli.ts browser install

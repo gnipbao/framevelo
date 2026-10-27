@@ -208,6 +208,16 @@ export function pageInstallRuntime(): void {
     clearTimeout: window.clearTimeout.bind(window),
   };
   const sleep = (ms: number) => new Promise<void>((resolve) => clock.setTimeout(resolve, ms));
+  /** `work`, or a rejection with `message` once it has taken `ms`: a stalled encoder must fail, not hang. */
+  const within = <T>(work: Promise<T>, ms: number, message: string): Promise<T> => {
+    let timer = 0;
+    const limit = new Promise<never>((_, reject) => {
+      timer = clock.setTimeout(() => reject(new Error(message)), ms) as unknown as number;
+    });
+    return Promise.race([work, limit]).finally(() => clock.clearTimeout(timer));
+  };
+  /** How long the encoder may go without returning a frame. */
+  const ENCODER_STALL_MS = 60_000;
   // Await only real promises: animation libraries return chainable objects with a then() that
   // resolves when playback completes, which never happens for a paused timeline.
   const settle = async (value: unknown) => {
@@ -303,6 +313,8 @@ export function pageInstallRuntime(): void {
     config: VideoEncoderConfig;
     hardwareFallback: boolean;
     encoderError: unknown;
+    /** Rejects when the encoder reports an error, so that waits on it end. */
+    failed: Promise<never>;
     pending: Uint8Array[];
     pendingBytes: number;
     inFlight: number;
@@ -757,6 +769,9 @@ export function pageInstallRuntime(): void {
       stats: { seekMs: 0, paintMs: 0, encodeWaitMs: 0, transferWaitMs: 0, reusedPaints: 0, chunks: 0, emptyChunks: 0 },
     } as unknown as Session;
 
+    let fail: (error: unknown) => void = () => {};
+    s.failed = new Promise<never>((_, reject) => (fail = reject));
+    s.failed.catch(() => {});
     s.encoder = new VideoEncoder({
       output: (chunk) => {
         if (s.warmups.delete(chunk.timestamp)) return;
@@ -770,6 +785,7 @@ export function pageInstallRuntime(): void {
       },
       error: (error) => {
         s.encoderError ??= error;
+        fail(error);
       },
     });
     // Annex-B keeps SPS/PPS in-band so the stream can be piped straight into FFmpeg.
@@ -837,7 +853,11 @@ export function pageInstallRuntime(): void {
 
     const e0 = clock.now();
     while (s.encoder.encodeQueueSize > s.o.maxEncodeQueue) {
-      await new Promise((r) => s.encoder.addEventListener("dequeue", r, { once: true }));
+      await within(
+        Promise.race([new Promise((r) => s.encoder.addEventListener("dequeue", r, { once: true })), s.failed]),
+        ENCODER_STALL_MS,
+        `The video encoder returned no frame for ${ENCODER_STALL_MS / 1000} s (frame ${frameIndex}).`,
+      );
     }
     s.stats.encodeWaitMs += clock.now() - e0;
     // Bound the bytes waiting for Node so a slow muxer cannot grow page memory.
@@ -1011,7 +1031,7 @@ export function pageInstallRuntime(): void {
   async function end(): Promise<PageRenderStats> {
     const { s } = requireSession();
     try {
-      await s.encoder.flush();
+      await within(Promise.race([s.encoder.flush(), s.failed]), ENCODER_STALL_MS, `The video encoder did not finish within ${ENCODER_STALL_MS / 1000} s.`);
       if (s.encoderError) throw s.encoderError;
       await flush(s);
       w.__fvProgress(s.frames);

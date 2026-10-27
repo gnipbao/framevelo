@@ -13,7 +13,7 @@
 // Fixtures come from the HyperFrames repository at the tag of the pinned producer version (cloned into
 // ~/.cache/framevelo/bench unless --fixtures points at packages/producer/tests of a checkout).
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -173,7 +173,7 @@ if (suites.has("gsap")) {
       ...medianRun(runs.get(config)!),
       runs: runs.get(config),
       frames: streams(output).frames,
-      mb: round(Number(tool("stat", ["-f", "%z", output])) / 1e6, 1),
+      mb: round(statSync(output).size / 1e6, 1),
       ...(psnr ? { psnrAvg: round(psnr.average, 1), psnrMin: round(psnr.min, 1) } : {}),
     };
   });

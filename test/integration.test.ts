@@ -6,7 +6,6 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
 import { findChrome, isHeadlessShell } from "../src/chrome.ts";
 import { runDoctor } from "../src/doctor.ts";
 import { probeVideo } from "../src/ffmpeg.ts";
@@ -173,8 +172,11 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
 
   test("full Chrome renders HyperFrames pages that are not in front", async (t) => {
     // Full Chrome paints only its front tab; the fresh page after verification is not in front.
-    const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-    if (!existsSync(chrome) || !isHeadlessShell(process.env.FRAMEVELO_CHROME ?? "")) return t.skip("needs Google Chrome next to the headless shell");
+    // An installed Google Chrome, found with the caches (and their headless shells) out of the way.
+    const chrome = findChrome({ env: {}, home: dir });
+    if (!chrome || isHeadlessShell(chrome) || !isHeadlessShell(process.env.FRAMEVELO_CHROME ?? "")) {
+      return t.skip("needs Google Chrome next to the headless shell");
+    }
     const output = path.join(dir, "full-chrome.mp4");
     const result = await render({ ...logging, input: path.join(examples, "hyperframes-project"), output, start: 0.5, frames: 30, chromePath: chrome });
     assert.match(result.chrome, /^Chrome\//);

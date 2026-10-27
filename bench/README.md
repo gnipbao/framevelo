@@ -24,4 +24,5 @@ node bench/run.ts --suite gsap --repeats 5 --out bench/results/gsap-only.json
 - Every render runs alone, and wall time, CPU time and peak memory cover the whole process tree, sampled every 200 ms. Close screen recorders, video calls and other renders first: they share the GPU and the single hardware encoder. `run.ts` warns when the load average is high.
 - The regression fixtures come from the HyperFrames repository at the tag of the pinned producer version, cloned once into `~/.cache/framevelo/bench`. Pass `--fixtures <checkout>/packages/producer/tests` to use your own checkout.
 - The official CLI runs through `npx hyperframes@<version>` and is fetched before the first measurement.
+- The scripts run on macOS and Linux: they sample the process tree with `ps`.
 - [`parity.ts`](parity.ts) compares the two renderers on any HyperFrames projects of your own: `node bench/parity.ts <project>... [--resolution 4k]`.

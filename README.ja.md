@@ -6,7 +6,7 @@
   <a href="https://github.com/gnipbao/framevelo/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/gnipbao/framevelo/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Node 22.18+" src="https://img.shields.io/badge/node-%E2%89%A522.18-339933">
-  <img alt="macOS on Apple silicon" src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Apple%20silicon-555">
+  <img alt="macOS and Windows" src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Windows-555">
   <a href="#ai-エージェントから使う"><img alt="MCP server" src="https://img.shields.io/badge/MCP-server-7c5cff"></a>
 </p>
 
@@ -62,7 +62,7 @@ framevelo render examples/dom-cards -o dom-cards.mp4 --scale 2
 framevelo render examples/canvas-particles -o particles.mp4 --codec hevc --subframes 3
 ```
 
-**動作環境：** Apple シリコンの macOS（ほかのプラットフォームは未検証）、Node.js 22.18 以上、`PATH` 上の FFmpeg と FFprobe、Chrome 151 以上（`chrome-headless-shell` 推奨）。
+**動作環境：** macOS または Windows、Node.js 22.18 以上、`PATH` 上の FFmpeg と FFprobe、Chrome 151 以上（`chrome-headless-shell` 推奨）。上の数値はすべて Apple シリコンの macOS で測定しています。Windows では CI で同じ統合テストを実行しています。GPU にエンコーダーがあれば H.264 をハードウェアで、なければ Chrome のソフトウェアエンコーダーでエンコードします。HEVC にはハードウェアエンコーダーが必要です。Linux ではユニットテストのみ実行しています。
 
 ## レンダリングできるもの
 

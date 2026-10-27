@@ -25,14 +25,14 @@ test("the plugin version follows package.json", () => {
   assert.ok(plugin.description.length > 20);
 });
 
-test("the MCP server starts through the launcher script", () => {
+test("the MCP server starts through the Node launcher, which parses", () => {
   const mcp = json("plugin/.mcp.json") as { mcpServers: Record<string, { command: string; args: string[] }> };
-  assert.deepEqual(mcp.mcpServers.framevelo, { command: "sh", args: ["${CLAUDE_PLUGIN_ROOT}/scripts/mcp.sh"] });
-  execFileSync("sh", ["-n", path.join(repo, "plugin", "scripts", "mcp.sh")]);
+  assert.deepEqual(mcp.mcpServers.framevelo, { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/scripts/mcp.mjs"] });
+  execFileSync(process.execPath, ["--check", path.join(repo, "plugin", "scripts", "mcp.mjs")]);
 });
 
 test("the skill has a name and a description in its front matter", () => {
-  const skill = readFileSync(path.join(repo, "plugin", "skills", "framevelo", "SKILL.md"), "utf8");
+  const skill = readFileSync(path.join(repo, "plugin", "skills", "framevelo", "SKILL.md"), "utf8").replace(/\r\n/g, "\n");
   const front = /^---\n([\s\S]*?)\n---\n/.exec(skill)?.[1] ?? "";
   assert.match(front, /^name: framevelo$/m);
   const description = /^description: (.+)$/m.exec(front)?.[1] ?? "";
