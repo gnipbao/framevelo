@@ -12,7 +12,7 @@
 
 <p align="center"><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <b>日本語</b></p>
 
-**FrameVelo** は、コードで作る動画のためのレンダリング高速化ツールです。[HyperFrames](https://github.com/heygen-com/hyperframes) プロジェクトや、時間の純粋関数として描かれる HTML/CSS/GSAP・Canvas/WebGL ページを MP4 にレンダリングし、時間・CPU・メモリをハードウェアが許す限り抑えます。
+**FrameVelo** は、コードで作る動画のためのレンダリング高速化ツールです。[HyperFrames](https://github.com/heygen-com/hyperframes) プロジェクト、[Remotion](https://www.remotion.dev) プロジェクト、時間の純粋関数として描かれる HTML/CSS/GSAP・Canvas/WebGL ページを MP4 にレンダリングし、時間・CPU・メモリをハードウェアが許す限り抑えます。
 
 多くのコード動画レンダラーは、フレームごとにスクリーンショットを撮り、base64 で Node に送り、FFmpeg で再デコードし、CPU で YUV に変換してから x264 でエンコードします。FrameVelo はフレームを GPU 上に置いたまま処理します。
 
@@ -26,6 +26,7 @@ seek(t) ─► drawElementImage（DOM）/ canvas ─► VideoFrame ─► WebCod
 - 10 秒の GSAP コンポジションで、**`hyperframes render` より 4K で 3.8 倍、1080p で 2.0 倍高速**。4K では CPU 時間が 19 分の 1、ピークメモリが 76% 少なくなります。
 - **同じフレーム。** HyperFrames 公式の回帰テスト用プロジェクト 24 件のうち 23 件が、公式レンダリングと 40 dB 以上の PSNR で一致します。合計で 1.6 倍高速、CPU は 2.1 分の 1、ピークメモリは 49% 少なくなります。
 - **HyperFrames は公式パイプラインで処理。** フォント、サブコンポジション、クリップの表示区間、`<video>` フレーム、シェーダートランジション、音声ミックスは `@hyperframes/producer` が担当し、FrameVelo はキャプチャとエンコードだけを置き換えます。
+- **Remotion プロジェクトにも対応。** 同じプロジェクトで `remotion render` と比べると、CPU 時間は 2.4〜7 分の 1、ピークメモリは 65〜84% 少なく、所要時間は同じかそれ以下です（速度 1.0〜1.3 倍。FrameVelo と色が一致する `--color-space=bt709` と比べると 1.1〜1.6 倍）。Remotion は多数のタブで JPEG のスクリーンショットを並列に撮って CPU を使い切り、FrameVelo は CPU を空けておきます。バンドル、`<OffthreadVideo>` のフレーム、音声ミックスは Remotion 自身が担当し、音声はサンプル単位で一致します。
 - **確かな出力。** エンコード前に区間ごとにネイティブのスクリーンショットと照合し、差がある区間は自動的にスクリーンショットでキャプチャします。出力は ffprobe で検証してからアトミックに書き出します。
 - **エージェント対応。** MCP サーバー（`framevelo mcp`）、Claude Code プラグインとスキル、シェルだけのエージェント向けの `--json` 出力を備えています。
 
@@ -62,13 +63,28 @@ framevelo render examples/dom-cards -o dom-cards.mp4 --scale 2
 framevelo render examples/canvas-particles -o particles.mp4 --codec hevc --subframes 3
 ```
 
-**動作環境：** macOS または Windows、Node.js 22.18 以上、`PATH` 上の FFmpeg と FFprobe、Chrome 151 以上（`chrome-headless-shell` 推奨）。上の数値はすべて Apple シリコンの macOS で測定しています。Windows では CI で同じ統合テストを実行しています。GPU にエンコーダーがあれば H.264 をハードウェアで、なければ Chrome のソフトウェアエンコーダーでエンコードします。HEVC にはハードウェアエンコーダーが必要です。Linux ではユニットテストのみ実行しています。
+**動作環境：** macOS または Windows、Node.js 22.18 以上、`PATH` 上の FFmpeg と FFprobe、Chrome 151 以上（`chrome-headless-shell` 推奨）。上の数値はすべて Apple シリコンの macOS で測定しています。Windows では CI で同じ統合テストを実行しています。GPU にエンコーダーがあれば H.264 をハードウェアで、なければ Chrome のソフトウェアエンコーダーでエンコードします。HEVC にはハードウェアエンコーダーが必要です。Linux ではユニットテストのみ実行しています。Remotion プロジェクトは、プロジェクト自身の依存関係をインストールしておく必要があります（`npm install`）。
 
 ## レンダリングできるもの
 
 ### HyperFrames プロジェクト
 
 ルート要素に `data-composition-id` があるページは公式の HyperFrames パイプラインでコンパイル・配信されるため、`hyperframes render` と同じ結果になります。普通のページとしてレンダリングするには `--no-hyperframes` を付けます。
+
+### Remotion プロジェクト
+
+Remotion プロジェクト（ディレクトリまたはエントリファイル）を指定し、コンポジションを選びます。
+
+```bash
+framevelo render my-remotion-project/ --composition MyComp -o out.mp4 --props '{"title":"Hello"}'
+```
+
+Remotion に関わる部分はプロジェクト自身の Remotion が担当します。CLI がプロジェクトをバンドルし（`remotion.config.ts` も適用されます）、レンダラーがバンドルと `<OffthreadVideo>` のフレームを配信し、ミキサーが各フレームで再生されるものから音声を作ります。FrameVelo はコンポジションをマウントし（`calculateMetadata()` と解決済みの props を含む）、1 フレームずつ駆動して、キャプチャとエンコードだけを置き換えます。プロジェクトの依存関係はあらかじめインストールしておいてください。対応は Remotion 4 です（4.0.539 で検証）。Remotion はフレーム単位でレンダリングするため `--subframes` は効きません。モーションブラーはコンポジション内の `<CameraMotionBlur>` を使ってください。FrameVelo は HD 映像の色規格である BT.709 で出力してタグも付けます。`remotion render` は既定で BT.601 で変換するため、`--color-space=bt709` を付けると両者の色が一致します。プロジェクトには通常どおり Remotion のライセンスが適用されます。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/bench-remotion-dark.svg">
+  <img alt="Remotion プロジェクトを remotion render と FrameVelo でレンダリングしたときの実時間、CPU 時間、ピークメモリ" src="docs/assets/bench-remotion-light.svg" width="100%">
+</picture>
 
 ### シーク可能な任意のページ
 
@@ -120,7 +136,7 @@ command = "framevelo"
 args = ["mcp"]
 ```
 
-`render` は CLI と同じオプションを JSON で受け取り（`input`、`output`、`frames`、`start`、`quality`、`scale` など）、進捗を通知し、キャンセルでき、一度に 1 件ずつ実行して、出力パス、フレーム数、サイズ、所要時間、警告を返します。**シェルだけのエージェント：** `framevelo render <input> -o out.mp4 --json -q` は結果を JSON で出力し、失敗時は `{"error": "..."}` を出力して終了コード 1 で終わります。
+`render` は CLI と同じオプションを JSON で受け取り（`input`、`output`、`frames`、`start`、`quality`、`scale`、Remotion 用の `composition` と `props` など）、進捗を通知し、キャンセルでき、一度に 1 件ずつ実行して、出力パス、フレーム数、サイズ、所要時間、警告を返します。**シェルだけのエージェント：** `framevelo render <input> -o out.mp4 --json -q` は結果を JSON で出力し、失敗時は `{"error": "..."}` を出力して終了コード 1 で終わります。
 
 ## 仕組み
 
@@ -163,6 +179,8 @@ framevelo mcp
 | `--mount <prefix>=<dir>` | | 別のディレクトリを配信（例：`/vendor/=./vendor`） |
 | `--workers <n>` | CPU コア数から決定 | Node 駆動のフレームに使う最大ページ数。`1` で並列化を無効化 |
 | `--no-hyperframes` | | HyperFrames プロジェクトを普通のページとしてレンダリング |
+| `--composition <id>` | 唯一のもの | Remotion プロジェクト：レンダリングするコンポジション |
+| `--props <json\|file>` | 既定の props | Remotion プロジェクト：入力 props（インライン JSON または `.json` ファイル） |
 | `--no-paint-reuse` | | 毎フレーム描き直す |
 | `--no-video-proxy` | | 動画ソースをそのままシーク |
 | `--chrome <path>` | headless shell、次に Chrome | ブラウザの実行ファイル |
@@ -183,6 +201,7 @@ console.log(result.wallMs, result.stages, result.warnings);
 
 - `drawElementImage` は Origin Trial の API（Chrome 160 まで）で、Chrome 155 で形が変わりました。検証で退行は防げますが、Chrome を更新したら `node bench/parity.ts` で確認してください。
 - 動画中心の HyperFrames プロジェクトは、モーショングラフィックスほど速くなりません。新しい動画フレームごとにレンダリング更新が 1 回かかり、ページの並列化はその待ち時間を重ねる代わりにメモリを多く使います。
+- Remotion 対応は、Remotion 内部の Remotion 4 レンダリングページのプロトコルに従っています。別のバージョンのプロトコルを話すバンドルは、誤った映像を出す代わりに明確なエラーで拒否します。`<OffthreadVideo>` のフレームは、引き続き 1 フレームごとに Remotion のフレームサーバーから取得します。
 - ハードウェアエンコーダーはほかのアプリと共有されるため、画面収録やビデオ通話があるとエンコードが遅くなります。また同じ画質で x264 より多くのビットを必要とするため、ファイルは大きくなります。
 
 ## 開発

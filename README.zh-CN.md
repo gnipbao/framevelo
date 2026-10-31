@@ -12,7 +12,7 @@
 
 <p align="center"><a href="README.md">English</a> · <b>简体中文</b> · <a href="README.ja.md">日本語</a></p>
 
-**FrameVelo**：为代码生成的视频，加速每一帧。它把 [HyperFrames](https://github.com/heygen-com/hyperframes) 项目，以及任何按时间纯函数绘制的 HTML/CSS/GSAP 或 Canvas/WebGL 页面渲染成 MP4，在硬件允许的范围内把耗时、CPU 和内存压到最低。
+**FrameVelo**：为代码生成的视频，加速每一帧。它把 [HyperFrames](https://github.com/heygen-com/hyperframes) 项目、[Remotion](https://www.remotion.dev) 项目，以及任何按时间纯函数绘制的 HTML/CSS/GSAP 或 Canvas/WebGL 页面渲染成 MP4，在硬件允许的范围内把耗时、CPU 和内存压到最低。
 
 大多数代码视频渲染器的做法是：每帧截图 → base64 传回 Node → FFmpeg 再解码 → CPU 上转 YUV → x264 编码。FrameVelo 让帧一直留在 GPU 上：
 
@@ -26,6 +26,7 @@ seek(t) ─► drawElementImage（DOM）/ canvas ─► VideoFrame ─► WebCod
 - 渲染一段 10 秒的 GSAP 合成，**4K 比 `hyperframes render` 快 3.8 倍，1080p 快 2.0 倍**；4K 下 CPU 时间只有官方的 1/19，峰值内存少 76%。
 - **画面一致。**在 24 个 HyperFrames 官方回归用例上，23 个与官方渲染的 PSNR 在 40 dB 以上；合计快 1.6 倍，CPU 时间为官方的 1/2.1，峰值内存少 49%。
 - **HyperFrames 走官方管线。**字体、子合成、片段窗口、`<video>` 帧、着色器转场和混音都来自 `@hyperframes/producer`，FrameVelo 只替换采集和编码。
+- **也支持 Remotion 项目。**同样的项目，和 `remotion render` 相比，FrameVelo 的 CPU 时间少 2.4–7 倍、峰值内存少 65–84%，耗时持平或更短（速度 1.0–1.3 倍；和颜色与 FrameVelo 一致的 `--color-space=bt709` 相比为 1.1–1.6 倍）：Remotion 用多个标签页并行截 JPEG、把 CPU 跑满，FrameVelo 把 CPU 留给别的事。打包、`<OffthreadVideo>` 帧和混音仍由 Remotion 自己完成，音频逐采样一致。
 - **结果可靠。**编码前逐区间与原生截图比对，不一致的区间自动改用截图；输出用 ffprobe 校验后原子写入。
 - **为 Agent 准备好。**MCP 服务（`framevelo mcp`）、Claude Code 插件与 skill，以及给只能用 shell 的 Agent 的 `--json` 输出。
 
@@ -62,13 +63,28 @@ framevelo render examples/dom-cards -o dom-cards.mp4 --scale 2
 framevelo render examples/canvas-particles -o particles.mp4 --codec hevc --subframes 3
 ```
 
-**环境要求：**macOS 或 Windows、Node.js 22.18+、`PATH` 中有 FFmpeg 和 FFprobe、Chrome 151+（优先 `chrome-headless-shell`）。上面的性能数据都在 Apple 芯片的 macOS 上测得。Windows 在 CI 中跑同样的集成测试：显卡带编码器时用硬件编码 H.264，否则用 Chrome 的软件编码器；HEVC 需要硬件编码器。Linux 只跑单元测试。
+**环境要求：**macOS 或 Windows、Node.js 22.18+、`PATH` 中有 FFmpeg 和 FFprobe、Chrome 151+（优先 `chrome-headless-shell`）。上面的性能数据都在 Apple 芯片的 macOS 上测得。Windows 在 CI 中跑同样的集成测试：显卡带编码器时用硬件编码 H.264，否则用 Chrome 的软件编码器；HEVC 需要硬件编码器。Linux 只跑单元测试。Remotion 项目需要先装好项目自己的依赖（`npm install`）。
 
 ## 能渲染什么
 
 ### HyperFrames 项目
 
 根节点带 `data-composition-id` 的页面交给官方 HyperFrames 管线编译和提供服务，渲染结果与 `hyperframes render` 一致。加 `--no-hyperframes` 可按普通页面渲染。
+
+### Remotion 项目
+
+把 FrameVelo 指向一个 Remotion 项目（项目目录或入口文件），并指定合成：
+
+```bash
+framevelo render my-remotion-project/ --composition MyComp -o out.mp4 --props '{"title":"Hello"}'
+```
+
+Remotion 相关的部分都交给项目自己的 Remotion：它的 CLI 打包项目（`remotion.config.ts` 照常生效），它的渲染器提供打包结果和 `<OffthreadVideo>` 的视频帧，它的混音器根据每帧播放的内容生成音频。FrameVelo 挂载合成（含 `calculateMetadata()` 和解析后的 props），逐帧驱动，只替换采集和编码。项目需要先装好依赖；支持 Remotion 4（测试版本 4.0.539）。Remotion 按整帧渲染，所以 `--subframes` 不起作用，运动模糊请在合成里用 `<CameraMotionBlur>`。FrameVelo 输出并标注 BT.709（高清视频的色彩标准）；`remotion render` 默认按 BT.601 转换，加 `--color-space=bt709` 后两者颜色一致。项目本身照常遵守 Remotion 的许可证。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/bench-remotion-dark.svg">
+  <img alt="remotion render 与 FrameVelo 渲染 Remotion 项目的耗时、CPU 时间和峰值内存" src="docs/assets/bench-remotion-light.svg" width="100%">
+</picture>
 
 ### 任何可 seek 的页面
 
@@ -120,7 +136,7 @@ command = "framevelo"
 args = ["mcp"]
 ```
 
-`render` 接收与命令行相同的参数，写成 JSON（`input`、`output`、`frames`、`start`、`quality`、`scale` 等）；渲染中发送进度通知，可以取消，一次只跑一个任务，返回输出路径、帧数、尺寸、耗时和警告。**只能用 shell 的 Agent：**`framevelo render <input> -o out.mp4 --json -q` 输出 JSON 结果；失败时输出 `{"error": "..."}` 并以 1 退出。
+`render` 接收与命令行相同的参数，写成 JSON（`input`、`output`、`frames`、`start`、`quality`、`scale`，Remotion 项目还有 `composition` 和 `props` 等）；渲染中发送进度通知，可以取消，一次只跑一个任务，返回输出路径、帧数、尺寸、耗时和警告。**只能用 shell 的 Agent：**`framevelo render <input> -o out.mp4 --json -q` 输出 JSON 结果；失败时输出 `{"error": "..."}` 并以 1 退出。
 
 ## 工作原理
 
@@ -163,6 +179,8 @@ framevelo mcp
 | `--mount <prefix>=<dir>` | | 额外提供一个目录，例如 `/vendor/=./vendor` |
 | `--workers <n>` | 按 CPU 核数 | Node 驱动帧最多使用的页面数；`1` 关闭多页面并行 |
 | `--no-hyperframes` | | 把 HyperFrames 项目当普通页面渲染 |
+| `--composition <id>` | 唯一的那个 | Remotion 项目：要渲染的合成 |
+| `--props <json\|file>` | 默认 props | Remotion 项目：输入 props，内联 JSON 或 `.json` 文件 |
 | `--no-paint-reuse` | | 每帧都重新绘制 |
 | `--no-video-proxy` | | 不生成视频代理，直接定位源文件 |
 | `--chrome <path>` | 先 headless shell，再 Chrome | 浏览器可执行文件 |
@@ -183,6 +201,7 @@ console.log(result.wallMs, result.stages, result.warnings);
 
 - `drawElementImage` 是 Origin Trial API（到 Chrome 160），并在 Chrome 155 改过形态。自校验能挡住回归；升级 Chrome 后建议用 `node bench/parity.ts` 复核。
 - 视频为主的 HyperFrames 项目提速不如动效项目明显：每个新视频帧要多付一次渲染更新，多页面并行可以把这些等待重叠起来，代价是更多内存。
+- Remotion 支持依赖 Remotion 4 的渲染页协议，这是 Remotion 的内部接口：遇到不同版本协议的打包结果会给出明确的错误，而不是渲染出错误的画面。每个 `<OffthreadVideo>` 帧仍要从 Remotion 的帧服务器取一次。
 - 硬件编码器与其他应用共享，录屏或视频会议会让编码变慢；同等画质下它比 x264 需要更高码率，所以文件更大。
 
 ## 开发

@@ -1,6 +1,7 @@
 // End-to-end renders through real Chrome and FFmpeg. Enabled with FRAMEVELO_INTEGRATION=1.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { cp, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -82,22 +83,33 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     assert.equal(lastProgress, 20);
   });
 
-  test("Node-driven frames split across worker pages concatenate seamlessly", async () => {
-    const common = { input: path.join(examples, "dom-cards"), capture: "screenshot", fps: 120, frames: 400, width: 320, height: 180 } as const;
+  test("injected video frames split across worker pages concatenate seamlessly", async () => {
+    // A HyperFrames composition that is 15 s of video: 450 frames injected from Node, two pages.
+    const project = path.join(fixtures, "hf-long-video");
+    if (!existsSync(path.join(project, "clip.mp4"))) {
+      execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:duration=15", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", "30", path.join(project, "clip.mp4")]);
+    }
     const single = path.join(dir, "workers-1.mp4");
     const split = path.join(dir, "workers-2.mp4");
-    assert.equal((await render({ ...logging, ...common, output: single, workers: 1 })).workers, 1);
-    const result = await render({ ...logging, ...common, output: split, workers: 2 });
+    assert.equal((await render({ ...logging, input: project, output: single, workers: 1 })).workers, 1);
+    const result = await render({ ...logging, input: project, output: split, workers: 2 });
     assert.equal(result.workers, 2);
-    assert.equal((await probeVideo(split)).packets, 400);
+    assert.equal((await probeVideo(split)).packets, 450);
     const keyframes = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "frame=key_frame", "-of", "csv=p=0", split], { encoding: "utf8" })
       .trim()
       .split("\n")
       .flatMap((flag, i) => (flag.startsWith("1") ? [i] : []));
-    assert.ok(keyframes.includes(200), `the second range starts on a keyframe (keyframes ${keyframes.join(",")})`);
+    assert.ok(keyframes.includes(225), `the second range starts on a keyframe (keyframes ${keyframes.join(",")})`);
     const { stderr } = spawnSync("ffmpeg", ["-hide_banner", "-i", split, "-i", single, "-lavfi", "[0:v][1:v]psnr", "-f", "null", "-"], { encoding: "utf8" });
     const psnr = Number(/average:([\d.]+)/.exec(stderr)?.[1]);
     assert.ok(psnr > 40, `split and single-page renders match (PSNR ${psnr} dB)`);
+  });
+
+  test("screenshot frames stay on one page", async () => {
+    // Chrome serializes screenshot work: a second page would cost memory and gain little.
+    const result = await render({ ...logging, input: path.join(examples, "dom-cards"), output: path.join(dir, "shots.mp4"), capture: "screenshot", fps: 120, frames: 400, width: 320, height: 180, workers: 2 });
+    assert.equal(result.workers, 1);
+    assert.equal(result.screenshotFrames, 400);
   });
 
   test("HyperFrames project: official compile and runtime, injected video, plan audio", async () => {
@@ -181,6 +193,27 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     const result = await render({ ...logging, input: path.join(examples, "hyperframes-project"), output, start: 0.5, frames: 30, chromePath: chrome });
     assert.match(result.chrome, /^Chrome\//);
     assert.equal((await probeVideo(output)).packets, 30);
+  });
+
+  test("colours come out as drawn, decoded with the tags the file carries", async () => {
+    // Saturated red, green and blue show the encoder's matrix; dark grey shows its range, which
+    // differs between encoders (Chrome's software encoder on Windows writes full range) and moves it
+    // by 10 levels or more when mistagged. What must hold is what a player shows from the file's tags.
+    const output = path.join(dir, "colors.mp4");
+    const result = await render({ ...logging, input: path.join(fixtures, "color-patches.html"), output, frames: 3 });
+    const encoder = result.page.colorSpace;
+    assert.ok(encoder, "the encoder reports the colour space of its output");
+    const probe = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "stream=color_range,color_space", "-of", "json", output], { encoding: "utf8" });
+    const tags = (JSON.parse(probe) as { streams: { color_range: string; color_space: string }[] }).streams[0]!;
+    const context = `tags ${tags.color_range}/${tags.color_space}, encoder ${JSON.stringify(encoder)}`;
+    assert.equal(tags.color_range, encoder.fullRange ? "pc" : "tv", `tagged with the range the encoder wrote (${context})`);
+    const rgb = execFileSync("ffmpeg", ["-v", "error", "-i", output, "-frames:v", "1", "-vf", "scale=in_color_matrix=auto:in_range=auto,format=rgb24", "-f", "rawvideo", "-"]);
+    const drawn = { red: [255, 0, 0], green: [0, 255, 0], blue: [0, 0, 255], "dark grey": [40, 40, 40] };
+    Object.entries(drawn).forEach(([name, want], i) => {
+      const at = (32 * 256 + i * 64 + 32) * 3;
+      const got = [rgb[at]!, rgb[at + 1]!, rgb[at + 2]!];
+      assert.ok(got.every((v, c) => Math.abs(v - want[c]!) <= 6), `${name}: shown as ${got.join(",")}, drawn ${want.join(",")} (${context})`);
+    });
   });
 
   test("a page without a time driver fails clearly and leaves no partial file", async () => {

@@ -1,11 +1,11 @@
 ---
 name: framevelo
-description: Render code-driven videos to MP4 fast with FrameVelo, on the GPU and the hardware encoder - HyperFrames projects and any HTML/CSS/GSAP or Canvas/WebGL page that is a pure function of time. Use when the user wants such a page or project rendered, exported or previewed as a video (渲染视频、导出 MP4、出片、预览一段), wants a render to be faster or lighter on CPU and memory (加速渲染), or wants an HTML animation made renderable frame by frame. Not for editing existing video files or generating video with AI models.
+description: Render code-driven videos to MP4 fast with FrameVelo, on the GPU and the hardware encoder - HyperFrames projects, Remotion projects and any HTML/CSS/GSAP or Canvas/WebGL page that is a pure function of time. Use when the user wants such a page or project rendered, exported or previewed as a video (渲染视频、导出 MP4、出片、预览一段), wants a render to be faster or lighter on CPU and memory (加速渲染), or wants an HTML animation made renderable frame by frame. Not for editing existing video files or generating video with AI models.
 ---
 
 # FrameVelo
 
-FrameVelo turns a page that draws its frames from code into an MP4. Frames stay on the GPU (`drawElementImage` or the page's canvas) and go straight to the hardware encoder, so a render takes a fraction of the CPU and memory of screenshot-based renderers. HyperFrames projects are compiled by the official HyperFrames pipeline; FrameVelo replaces only capture and encoding.
+FrameVelo turns a page that draws its frames from code into an MP4. Frames stay on the GPU (`drawElementImage` or the page's canvas) and go straight to the hardware encoder, so a render takes a fraction of the CPU and memory of screenshot-based renderers. HyperFrames projects are compiled by the official HyperFrames pipeline, and Remotion projects are bundled, served and mixed by the project's own Remotion; in both, FrameVelo replaces only capture and encoding.
 
 ## Calling it
 
@@ -27,7 +27,7 @@ Use absolute paths. Run one render at a time: they share the single hardware enc
 
 ## Workflow
 
-1. **Find the input**: a project directory with `index.html`, or an `.html` file. Duration, fps and size come from the page (HyperFrames `data-duration`/`data-fps`/`data-width`, `window.__framevelo.duration`, the GSAP timeline length). Pass them only to override.
+1. **Find the input**: a project directory with `index.html`, an `.html` file, or a Remotion project (its directory, or its entry file such as `src/index.ts`). Duration, fps and size come from the page or the composition (HyperFrames `data-duration`/`data-fps`/`data-width`, `window.__framevelo.duration`, the GSAP timeline length, the Remotion `<Composition>`). Pass them only to override. A Remotion project with several compositions needs `composition`; its input props go in `props`. Its dependencies must be installed (`npm install` in the project).
 2. **Preview a slice** when the composition is new or just changed: `{ input, output: "/tmp/preview.mp4", start: 2, frames: 30, quality: "draft" }`. This takes seconds. Look at a frame: `ffmpeg -v error -ss 0.5 -i /tmp/preview.mp4 -frames:v 1 /tmp/preview.png`, then view the PNG.
 3. **Render in full** with defaults. Add `scale: 2` for 4K from a 1080p layout, or `subframes: 3` for motion blur.
 4. **Check the result**: `frames` is the count you expected; `audio` is true when the composition has sound; read `warnings`. `screenshotFrames > 0` means some intervals failed verification and were captured by screenshot (still correct, just slower).
@@ -74,6 +74,7 @@ Every frame must be a pure function of time. FrameVelo seeks the page through th
 | Transparent DOM over a color | `background: "#000"` |
 | Page loads files from outside its folder | `mounts: {"/vendor/": "/abs/path/to/vendor"}` |
 | HyperFrames project as a plain page | `hyperframes: false` |
+| Remotion composition and its props | `composition: "MyComp"`, `props: {"title": "Hi"}` (CLI: `--composition`, `--props '{...}'` or a `.json` file) |
 
 ## When it fails
 
@@ -87,5 +88,10 @@ Every frame must be a pure function of time. FrameVelo seeks the page through th
 | `No element matches selector` / `Nothing to capture` / `has no size` | Point `selector` at a visible element with a size, or fix the layout. |
 | `Rendering a HyperFrames project needs ... @hyperframes/producer` | Use the `npx -p @hyperframes/...` command above, or install the packages next to FrameVelo. |
 | `No paint event within ...` | The page stopped painting; usually a hung script. Check it in a browser. |
+| `This Remotion project has N compositions; pick one` / `No composition "X"` | Pass `composition` with one of the ids the message lists. |
+| `Rendering a Remotion project needs the project's own Remotion packages` | The project's dependencies are not installed: run `npm install` in the project. |
+| `remotion bundle failed` | The project does not build; the message carries the bundler's error (a missing `tsconfig.json`, a syntax error). Fix the project. |
+| `The Remotion composition failed at frame N` | `cancelRender()` or a `delayRender()` timeout in the composition; the message carries Remotion's error. |
+| `page protocol` (Remotion) | The project's Remotion speaks another render protocol than FrameVelo supports (Remotion 4). |
 
 Renders are atomic: a failed or cancelled render leaves no output file.

@@ -56,6 +56,8 @@ Render options:
       --background <css>  Color behind transparent DOM content (default: page background)
       --no-hyperframes    Render a HyperFrames project as a plain page instead of compiling it
                           with the official HyperFrames pipeline (@hyperframes/producer)
+      --composition <id>  Remotion projects: the composition to render (default: the only one)
+      --props <json|file> Remotion projects: input props, as JSON or a .json file
       --mount <p>=<dir>   Serve another directory under a URL prefix (repeatable), e.g.
                           --mount /vendor/=~/shared/vendor
       --chrome <path>     Chrome binary (default: FRAMEVELO_CHROME, newest chrome-headless-shell 151+
@@ -80,6 +82,16 @@ function oneOf<T extends string>(name: string, raw: string | undefined, allowed:
   if (raw === undefined) return undefined;
   if (!(allowed as readonly string[]).includes(raw)) throw new Error(`--${name} must be one of ${allowed.join(", ")}; got "${raw}".`);
   return raw as T;
+}
+
+/** Input props from inline JSON or a .json file. */
+function parseProps(value: string): unknown {
+  const text = value.trim().startsWith("{") || value.trim().startsWith("[") ? value : readFileSync(path.resolve(value), "utf8");
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(`--props must be JSON or a JSON file: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function defaultOutput(input: string): string {
@@ -119,6 +131,8 @@ async function renderCommand(argv: string[]): Promise<void> {
       chrome: { type: "string" },
       mount: { type: "string", multiple: true },
       "no-hyperframes": { type: "boolean" },
+      composition: { type: "string" },
+      props: { type: "string" },
       json: { type: "boolean" },
       quiet: { type: "boolean", short: "q" },
     },
@@ -176,6 +190,8 @@ async function renderCommand(argv: string[]): Promise<void> {
   assign("background", values.background);
   assign("chromePath", values.chrome);
   if (values["no-hyperframes"]) options.hyperframes = "off";
+  assign("composition", values.composition);
+  if (values.props !== undefined) options.props = parseProps(values.props);
   if (values.mount?.length) {
     const mounts: Record<string, string> = {};
     for (const spec of values.mount) {

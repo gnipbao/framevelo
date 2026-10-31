@@ -8,6 +8,7 @@ import { codecString, keyframeInterval, type Codec } from "./options.ts";
 import {
   pageBootstrap,
   pageInstallRuntime,
+  type EncodedColorSpace,
   type FrameVeloPageApi,
   type PageEncodeOptions,
   type PagePrepareOptions,
@@ -33,7 +34,14 @@ export async function openCapturePage(
   browser: Browser,
   url: string,
   viewport: { width: number; height: number },
-  options: { seedRandom?: boolean; ownWindow?: boolean } = {},
+  options: {
+    seedRandom?: boolean;
+    ownWindow?: boolean;
+    /** Runs before navigation, e.g. to add scripts that must run before the page's own. */
+    beforeLoad?: (page: Page) => Promise<void>;
+    /** Runs once the page and the FrameVelo runtime are loaded, before preparation. */
+    afterLoad?: (page: Page) => Promise<void>;
+  } = {},
 ): Promise<CapturePage> {
   // Full Chrome keeps its tabs in one window and paints only the front one: a capture page that is
   // not in front would never paint. Each page gets a window of its own there.
@@ -42,8 +50,10 @@ export async function openCapturePage(
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error instanceof Error ? error.message : String(error)));
   await page.evaluateOnNewDocument(pageBootstrap, { seedRandom: options.seedRandom ?? false });
+  await options.beforeLoad?.(page);
   await page.goto(url, { waitUntil: "load" });
   await page.evaluate(pageInstallRuntime);
+  await options.afterLoad?.(page);
   return { page, errors };
 }
 
@@ -107,6 +117,8 @@ export interface CaptureJob {
   openWorker?: () => Promise<CaptureWorker>;
   /** Called once every page the render uses is open, so pages opened ahead of time can be closed. */
   pagesReady?: () => void;
+  /** Called with each page once it has rendered its range, before it closes. */
+  afterRange?: (page: Page) => Promise<void>;
   paintTimeoutMs?: number;
   ffmpegPath?: string;
   ffprobePath?: string;
@@ -202,6 +214,18 @@ function mergeStats(all: PageRenderStats[]): PageRenderStats {
 
 const SCREENSHOT_TIMEOUT_MS = 60_000;
 
+/**
+ * One screenshot at a time across pages. Chrome largely serializes screenshot work anyway (two pages
+ * gain about 6%), and on the macOS CI runner two pages capturing at once sometimes never got a
+ * screenshot back.
+ */
+let screenshotTurn: Promise<unknown> = Promise.resolve();
+function oneScreenshotAtATime<T>(work: () => Promise<T>): Promise<T> {
+  const run = screenshotTurn.then(work, work);
+  screenshotTurn = run.catch(() => {});
+  return run;
+}
+
 /** `work`, or a rejection with `message` after `ms`. */
 function withTimeout<T>(ms: number, message: string, work: Promise<T>): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -219,20 +243,36 @@ function pageDriver(page: Page, width: number) {
     seek: (t: number, quiet = false) => page.evaluate((time, q) => (window as unknown as FvWindow).__fv.seek(time, q), t, quiet),
     setRoute: (route: CaptureRoute) => page.evaluate((r) => (window as unknown as FvWindow).__fv.setRoute(r), route),
     settle: () => page.evaluate(() => (window as unknown as FvWindow).__fv.settle()),
-    // `shotWidth` is the pixel width of the shot: the output width for frames, less for
-    // verification, which compares at reduced size anyway.
-    async screenshot(shotWidth = width): Promise<string> {
+    // `shotWidth` is the pixel width of the shot: the output width for frames, the element's own CSS
+    // width (null) for verification. A shot scaled below 1x is rasterized at that lower scale, and
+    // its edges differ from a downscaled full-size paint: verification would fail on sharp content.
+    async screenshot(shotWidth: number | null = width): Promise<string> {
       await page.evaluate(() => (window as unknown as FvWindow).__fv.composite());
-      cdp ??= await page.createCDPSession();
       const rect = await page.evaluate(() => (window as unknown as FvWindow).__fv.targetRect());
-      // Protocol calls have no timeout (renders are long): a screenshot that never comes must fail.
-      const { data } = await withTimeout(SCREENSHOT_TIMEOUT_MS, "Chrome returned no screenshot within 60 s.", cdp.send("Page.captureScreenshot", {
-        format: "jpeg",
-        quality: 95,
-        optimizeForSpeed: true,
-        clip: { ...rect, scale: shotWidth / rect.width },
-      }));
-      return data;
+      const shoot = async () => {
+        cdp ??= await page.createCDPSession();
+        // Protocol calls have no timeout (renders are long): a screenshot that never comes must fail.
+        const { data } = await withTimeout(
+          SCREENSHOT_TIMEOUT_MS,
+          "Chrome returned no screenshot within 60 s.",
+          cdp.send("Page.captureScreenshot", {
+            format: "jpeg",
+            quality: 95,
+            optimizeForSpeed: true,
+            clip: { ...rect, scale: shotWidth === null ? 1 : shotWidth / rect.width },
+          }),
+        );
+        return data;
+      };
+      try {
+        return await oneScreenshotAtATime(shoot);
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.startsWith("Chrome returned no screenshot")) throw error;
+        // Once more, on a fresh protocol session.
+        await cdp?.detach().catch(() => {});
+        cdp = undefined;
+        return oneScreenshotAtATime(shoot);
+      }
     },
     detach: () => cdp?.detach().catch(() => {}),
   };
@@ -270,22 +310,30 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
   const files: string[] = [];
 
   const audioEncoder = job.audio ? (job.audio.copy ? "copy" : await detectAacEncoder(job.ffmpegPath)) : undefined;
-  let mux: MuxProcess | undefined = startMux(
-    buildMuxArgs({
-      codec: job.codec,
-      fps: job.fps,
-      output: staging,
-      ...(job.audio ? { audio: path.resolve(job.audio.path), audioOffset: job.audio.offset, videoSeconds: job.frames / job.fps } : {}),
-      ...(audioEncoder ? { audioEncoder } : {}),
-    }),
-    job.ffmpegPath,
-  );
+  // The muxer starts with the first encoded bytes: by then the encoder has reported the stream's
+  // colour space (range and matrix differ between encoders), which the container is tagged with.
+  let colorSpace: EncodedColorSpace | undefined;
+  let mux: MuxProcess | undefined;
+  const openMux = (): MuxProcess =>
+    (mux ??= startMux(
+      buildMuxArgs({
+        codec: job.codec,
+        fps: job.fps,
+        output: staging,
+        ...(job.audio ? { audio: path.resolve(job.audio.path), audioOffset: job.audio.offset, videoSeconds: job.frames / job.fps } : {}),
+        ...(audioEncoder ? { audioEncoder } : {}),
+        ...(colorSpace ? { colorSpace } : {}),
+      }),
+      job.ffmpegPath,
+    ));
   try {
-    const activeMux = mux;
     const streamDump = process.env.FRAMEVELO_DUMP_STREAM;
     if (streamDump) await writeFile(streamDump, "");
     const progress: number[] = [];
     const attach = async (page: Page, index: number, sink: (bytes: Buffer) => Promise<void>) => {
+      await page.exposeFunction("__fvColorSpace", (json: string) => {
+        colorSpace ??= JSON.parse(json) as EncodedColorSpace;
+      });
       await page.exposeFunction("__fvChunk", (base64: string) => sink(Buffer.from(base64, "base64")));
       await page.exposeFunction("__fvProgress", (done: number) => {
         progress[index] = done;
@@ -297,7 +345,7 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     const firstLaneSink = (lane: Lane) => async (bytes: Buffer) => {
       if (lane.part) return appendFile(lane.part, bytes);
       if (streamDump) await appendFile(streamDump, bytes);
-      await activeMux.write(bytes);
+      await openMux().write(bytes);
     };
     await attach(job.page, 0, firstLaneSink(main));
 
@@ -318,12 +366,13 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     };
     const begin = (page: Page) => page.evaluate((o) => (window as unknown as FvWindow).__fv.begin(o), encodeOptions);
 
-    // Workers pay off for frames driven from Node, which are latency-bound. Open them while the
-    // main page verifies when the frames are known to be Node-driven up front (video injection,
-    // forced screenshots); they then take a share of the verification too.
+    // Workers pay off for frames driven from Node through the page (video injection): each waits
+    // on round trips, not on the GPU. Screenshot frames do not count: Chrome serializes screenshot
+    // work, so a second page gained about 6% there. Workers open while the main page verifies when
+    // the frames are known up front, and take a share of the verification too.
     // A page costs about a second to open and a few hundred MB: one per FRAMES_PER_WORKER frames.
     const nodeDriven = (routeOf: (frame: number) => CaptureRoute) =>
-      planSegments(job, routeOf).reduce((n, segment) => n + (segment.hooked ? segment.count : 0), 0);
+      planSegments(job, routeOf).reduce((n, segment) => n + (segment.hooked && segment.route === "dom" ? segment.count : 0), 0);
     const laneCount = (driven: number) =>
       job.openWorker ? Math.max(1, Math.min(job.workers ?? 1, Math.floor(driven / FRAMES_PER_WORKER))) : 1;
     const openLanes = (count: number) => {
@@ -411,7 +460,9 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
         if (range.start > job.startFrame) await lane.driver.seek((range.start - 1) / job.fps);
         const result = await renderRange(job, lane, range, routeOf, loop);
         screenshotFrames += result.screenshotFrames;
-        return lane.driver.page.evaluate(() => (window as unknown as FvWindow).__fv.end());
+        const stats = await lane.driver.page.evaluate(() => (window as unknown as FvWindow).__fv.end());
+        await job.afterRange?.(lane.driver.page);
+        return stats;
       }),
     );
     const pageStats = mergeStats(stats);
@@ -422,11 +473,11 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
       for (const lane of lanes) {
         for await (const chunk of createReadStream(lane.part!)) {
           if (streamDump) await appendFile(streamDump, chunk as Buffer);
-          await mux.write(chunk as Buffer);
+          await openMux().write(chunk as Buffer);
         }
       }
     }
-    await mux.finish();
+    await openMux().finish();
     mux = undefined;
 
     const probe = await probeVideo(staging, job.ffprobePath);
@@ -515,7 +566,7 @@ async function planRoutes(
       // Moving the composition out of the capture canvas restarts CSS animations: seek again.
       await driver.setRoute("screenshot");
       await quietSeekAndHook(t);
-      const shot = await driver.screenshot(Math.min(640, job.width));
+      const shot = await driver.screenshot(null);
       const psnr = await page.evaluate((b64) => (window as unknown as FvWindow).__fv.compareScreenshot(b64), shot);
       psnrByFrame.set(frame, psnr);
       if (process.env.FRAMEVELO_VERIFY_DUMP) {

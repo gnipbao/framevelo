@@ -15,5 +15,7 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "test", "scripts", "bench"]
+  "include": ["src", "test", "scripts", "bench"],
+  // Fixture projects (a Remotion project) are typechecked by their own tooling.
+  "exclude": ["test/fixtures"]
 }

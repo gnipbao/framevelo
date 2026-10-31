@@ -10,7 +10,8 @@ import { render, type RenderOptions, type RenderResult } from "./render.ts";
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS = `FrameVelo renders code-driven videos to MP4 on the GPU and the hardware encoder.
-- Inputs: a HyperFrames project, or an HTML page that is a pure function of
+- Inputs: a HyperFrames project, a Remotion project (its directory or entry file; pick the composition
+  with "composition"), or an HTML page that is a pure function of
   time (window.__framevelo = { seek(t), duration }, window.__seek(t), or a paused GSAP timeline on
   window.__timelines.main). Pages driven by requestAnimationFrame loops or wall-clock time cannot be rendered.
 - Use absolute paths. Renders run one at a time.
@@ -22,12 +23,12 @@ const TOOLS = [
     name: "render",
     title: "Render to MP4",
     description:
-      "Render a code-driven video to MP4: a HyperFrames project, or any HTML page that is a pure function of time. " +
+      "Render a code-driven video to MP4: a HyperFrames project, a Remotion project, or any HTML page that is a pure function of time. " +
       "Returns the output path, frame count, size, timings and warnings. Duration, fps and size default to what the page declares.",
     inputSchema: {
       type: "object",
       properties: {
-        input: { type: "string", description: "An .html file, or a directory containing index.html (absolute path)." },
+        input: { type: "string", description: "An .html file, a directory containing index.html, or a Remotion project directory or entry file (absolute path)." },
         output: { type: "string", description: "Output .mp4 path. Default: <name>.mp4 next to the input." },
         fps: { type: "number", exclusiveMinimum: 0, description: "Frame rate; integers and NTSC rates (29.97, 59.94)." },
         duration: { type: "number", exclusiveMinimum: 0, description: "Seconds to render." },
@@ -52,6 +53,8 @@ const TOOLS = [
           description: "DOM pages: auto verifies drawElementImage against screenshots and falls back per interval.",
         },
         hyperframes: { type: "boolean", description: "false renders a HyperFrames project as a plain page." },
+        composition: { type: "string", description: "Remotion projects: the composition id (required when the project has several)." },
+        props: { type: "object", description: "Remotion projects: input props for the composition." },
         workers: { type: "integer", minimum: 1, maximum: 16, description: "Most pages for Node-driven frames; 1 turns parallel pages off." },
         mounts: {
           type: "object",
@@ -158,6 +161,11 @@ export function renderOptionsFromArgs(args: Json): RenderOptions {
   set("selector", string("selector"));
   set("capture", choice("capture", ["auto", "dom", "screenshot"] as const));
   set("workers", number("workers", true));
+  set("composition", string("composition"));
+  if (args.props !== undefined) {
+    if (!args.props || typeof args.props !== "object" || Array.isArray(args.props)) throw new Error("props must be an object of input props.");
+    options.props = args.props;
+  }
   if (args.hyperframes !== undefined) {
     if (typeof args.hyperframes !== "boolean") throw new Error("hyperframes must be a boolean.");
     if (!args.hyperframes) options.hyperframes = "off";

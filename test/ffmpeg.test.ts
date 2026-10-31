@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildMuxArgs, frameTimeBase } from "../src/ffmpeg.ts";
+import { buildMuxArgs, colorTags, frameTimeBase } from "../src/ffmpeg.ts";
 
 const valueAfter = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
 
@@ -63,4 +63,17 @@ test("an AAC track can be copied instead of re-encoded", () => {
   const args = buildMuxArgs({ codec: "h264", fps: 30, output: "o.mp4", audio: "mix.m4a", audioEncoder: "copy" });
   assert.equal(valueAfter(args, "-c:a"), "copy");
   assert.ok(!args.includes("-b:a"));
+});
+
+test("the stream is tagged with the range and matrix the encoder reported", () => {
+  // Chrome's software H.264 encoder on Windows writes full-range BT.709; the others limited range.
+  const full = buildMuxArgs({ codec: "h264", fps: 30, output: "out.mp4", colorSpace: { matrix: "bt709", primaries: "bt709", transfer: "iec61966-2-1", fullRange: true } });
+  assert.match(valueAfter(full, "-bsf:v")!, /video_full_range_flag=1:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1/);
+  assert.equal(valueAfter(full, "-color_range"), "pc");
+  const bt601 = buildMuxArgs({ codec: "hevc", fps: 30, output: "out.mp4", colorSpace: { matrix: "smpte170m", primaries: "smpte170m", fullRange: false } });
+  assert.match(valueAfter(bt601, "-bsf:v")!, /^hevc_metadata=video_full_range_flag=0:colour_primaries=6:transfer_characteristics=1:matrix_coefficients=6/);
+  assert.deepEqual([valueAfter(bt601, "-colorspace"), valueAfter(bt601, "-color_primaries"), valueAfter(bt601, "-color_range")], ["smpte170m", "smpte170m", "tv"]);
+  // Nothing reported, or something unknown: BT.709, limited range.
+  assert.deepEqual(colorTags(), { matrixCode: 1, matrix: "bt709", primariesCode: 1, primaries: "bt709", fullRange: false });
+  assert.deepEqual(colorTags({ matrix: "rgb", primaries: "film" }), colorTags());
 });

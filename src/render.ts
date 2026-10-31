@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { readFile, rename, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Browser } from "puppeteer-core";
@@ -12,12 +13,25 @@ import {
   type CaptureWorker,
 } from "./capture.ts";
 import { chromeMajor, findChrome, framevelCacheDir, isHeadlessShell, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
+import { probeVideo, remuxWithAudio } from "./ffmpeg.ts";
 import { ensureProxy } from "./media-proxy.ts";
 import { isHyperFramesHtml, loadHyperFrames, PAGE_SIDE_COMPOSITING_FLAG, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
 import { defaultBitrate, evenDimension, frameCount, subframeOffsets, type Codec, type Quality } from "./options.ts";
 import type { CaptureMode, FrameVeloPageApi, PagePrepareResult, PageRenderStats, TimeDriver } from "./page-runtime.ts";
 import type { IntervalPlan } from "./planner.ts";
 import { resolveInsideRoot, serveDirectory, type StaticServer } from "./server.ts";
+import {
+  loadRemotion,
+  mixRemotionAudio,
+  mountRemotionComposition,
+  prepareRemotionSite,
+  REMOTION_ENTRY_CANDIDATES,
+  remotionProjectFor,
+  serializeInputProps,
+  setUpRemotionPage,
+  type RemotionApi,
+  type RemotionSite,
+} from "./remotion.ts";
 import { VIRTUAL_TIME_SHIM } from "./virtual-time-shim.ts";
 
 export interface RenderOptions {
@@ -72,6 +86,10 @@ export interface RenderOptions {
    * "off" renders it as a plain seekable page.
    */
   hyperframes?: "auto" | "off";
+  /** Remotion projects: the composition to render (default: the only one). */
+  composition?: string;
+  /** Remotion projects: input props for the composition (JSON values). */
+  props?: unknown;
   /**
    * Pages that render frames driven from Node (HyperFrames video frames, screenshot capture) in
    * parallel, each over a contiguous part of the range. Default: chosen from the CPU count; 1 turns
@@ -99,7 +117,7 @@ export interface RenderResult {
   mode: "canvas" | "dom";
   driver: TimeDriver;
   /** "hyperframes" when the official HyperFrames compiler and runtime prepared the page. */
-  pipeline: "page" | "hyperframes";
+  pipeline: "page" | "hyperframes" | "remotion";
   chrome: string;
   hardwareEncoder: boolean;
   audio: boolean;
@@ -220,10 +238,12 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
   const { signal } = options;
   signal?.throwIfAborted();
   const codec: Codec = options.codec ?? "h264";
-  const { root, file } = await resolveInput(options.input);
-  const html = await readFile(file, "utf8");
+  // A Remotion project is source code, not a page: its own Remotion bundles and serves it.
+  const remotionProject = remotionProjectFor(options.input);
+  const { root, file } = remotionProject ? { root: remotionProject.projectDir, file: "" } : await resolveInput(options.input);
+  const html = remotionProject ? "" : await readFile(file, "utf8");
   const viewport = options.viewport ?? viewportFromHtml(html) ?? { width: 1920, height: 1080 };
-  const useHyperFrames = options.hyperframes !== "off" && isHyperFramesHtml(html);
+  const useHyperFrames = !remotionProject && options.hyperframes !== "off" && isHyperFramesHtml(html);
 
   const chromePath = findChrome(options.chromePath ? { explicitPath: options.chromePath } : {});
   if (!chromePath) {
@@ -233,6 +253,8 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
   }
 
   let site: HyperFramesSite | undefined;
+  let remotionSite: RemotionSite | undefined;
+  let remotionApi: RemotionApi | undefined;
   let server: StaticServer | undefined;
   let browser: Browser | undefined;
   const warnings: string[] = [];
@@ -246,7 +268,16 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
   try {
     let url: string;
     const c0 = performance.now();
-    if (useHyperFrames) {
+    if (remotionProject) {
+      remotionApi = loadRemotion(root);
+      const entry = remotionProject.entry;
+      if (!entry) {
+        throw new Error(`No Remotion entry point in ${root} (looked for ${REMOTION_ENTRY_CANDIDATES.join(", ")}); pass the entry file instead.`);
+      }
+      log(`remotion project: bundling ${path.relative(root, entry)} with remotion ${remotionApi.version}`);
+      remotionSite = await prepareRemotionSite(remotionApi, { projectDir: root, entry, onLog: log });
+      url = remotionSite.serveUrl;
+    } else if (useHyperFrames) {
       const api = await loadHyperFrames();
       const fps = options.fps ?? fpsFromHtml(html) ?? 30;
       log(`hyperframes project: compiling with @hyperframes/producer ${api.version}`);
@@ -278,12 +309,29 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     log(`chrome ${version} (${chromePath})`);
     // Plain pages get a seeded Math.random so renders repeat; HyperFrames keeps the official behavior.
     const pageOptions = {
-      mode: useHyperFrames ? "dom" : (options.mode ?? "auto"),
-      ...(options.selector ? { selector: options.selector } : {}),
-      readyTimeoutMs: options.readyTimeoutMs ?? (useHyperFrames ? 45_000 : 10_000),
+      mode: useHyperFrames || remotionSite ? "dom" : (options.mode ?? "auto"),
+      // Remotion renders the composition into its React root at the composition's size.
+      ...(options.selector ? { selector: options.selector } : remotionSite ? { selector: "#video-container" } : {}),
+      readyTimeoutMs: options.readyTimeoutMs ?? (useHyperFrames ? 45_000 : remotionSite ? 30_000 : 10_000),
       ...(useHyperFrames ? { expectHyperFrames: true } : {}),
+      ...(remotionSite ? { expectRemotion: true } : {}),
     } as const;
-    const pageSetup = { seedRandom: !useHyperFrames, ownWindow: !isHeadlessShell(chromePath) };
+    // Every Remotion page gets the render globals before the bundle loads, then mounts the composition.
+    const remotionPage = remotionSite && remotionApi
+      ? (() => {
+          const live = remotionSite;
+          const serializedInputProps = serializeInputProps(remotionApi, options.props);
+          const timeoutMs = options.readyTimeoutMs ?? 30_000;
+          return {
+            beforeLoad: (page: CapturePage["page"]) => setUpRemotionPage(page, { serializedInputProps, proxyPort: live.proxyPort, timeoutMs }),
+            afterLoad: async (page: CapturePage["page"]) => {
+              await mountRemotionComposition(page, { ...(options.composition ? { id: options.composition } : {}), timeoutMs });
+            },
+          };
+        })()
+      : {};
+    // Plain pages get a seeded Math.random so renders repeat; HyperFrames and Remotion keep their own.
+    const pageSetup = { seedRandom: !useHyperFrames && !remotionSite, ownWindow: !isHeadlessShell(chromePath), ...remotionPage };
     const openPrepared = async () => {
       const page = await openCapturePage(browser!, url, viewport, pageSetup);
       try {
@@ -293,9 +341,9 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
         throw error;
       }
     };
-    // A HyperFrames page nearly always verifies, and a page that verified hands its range to a
-    // fresh one: prepare that page alongside the main one, so a slow page pays its readiness wait once.
-    let spare = useHyperFrames ? openPrepared() : undefined;
+    // HyperFrames and Remotion pages nearly always verify, and a page that verified hands its range to
+    // a fresh one: prepare that page alongside the main one, so a slow page pays its readiness wait once.
+    let spare = useHyperFrames || remotionSite ? openPrepared() : undefined;
     spare?.catch(() => {});
     const capture: CapturePage = await openCapturePage(browser, url, viewport, pageSetup);
     const prepared: PagePrepareResult = await preparePage(capture, pageOptions);
@@ -328,7 +376,10 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     // page gets its own injector: it remembers what it injected.
     let hookFor: ((page: CapturePage["page"]) => (time: number) => Promise<void>) | undefined;
     let needsBeforeSample: ((time: number) => boolean) | undefined;
-    const offsets = subframeOffsets(options.subframes ?? 1, options.shutter ?? 0.5, fps);
+    if (remotionSite && (options.subframes ?? 1) > 1) {
+      warnings.push("Remotion renders whole frames, so --subframes has no effect; blur inside the composition with <CameraMotionBlur>");
+    }
+    const offsets = subframeOffsets(remotionSite ? 1 : (options.subframes ?? 1), options.shutter ?? 0.5, fps);
     if (site?.videos) {
       const api = await loadHyperFrames();
       const videos = site.videos;
@@ -374,12 +425,19 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       else warnings.push(`the page declares audio ${prepared.audio}, which is not a local file`);
     }
     const audioPath = options.audio ? path.resolve(options.audio) : (site?.audioPath ?? declaredAudio);
+    // Remotion's audio is mixed from the media each frame reports, once the frames are rendered.
+    const remotionAudio = Boolean(remotionSite && !options.audio);
+    const finalOutput = path.resolve(options.output);
+    const tag = randomBytes(4).toString("hex");
+    const videoOnly = path.join(path.dirname(finalOutput), `.${path.basename(finalOutput)}.${tag}.video.mp4`);
+    const assetsByFrame: Record<number, Array<{ type: string }>> = {};
+    const startFrame = Math.round(start * fps);
     const result = await captureToFile({
       page: capture.page,
       prepared,
-      output: options.output,
+      output: remotionAudio ? videoOnly : options.output,
       fps,
-      startFrame: Math.round(start * fps),
+      startFrame,
       frames,
       width,
       height,
@@ -390,7 +448,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       ...(options.reusePaints !== undefined ? { reusePaints: options.reusePaints } : {}),
       ...(options.verifyThresholdDb !== undefined ? { verifyThresholdDb: options.verifyThresholdDb } : {}),
       onLog: log,
-      ...(options.background ? { background: options.background } : {}),
+      ...(options.background ? { background: options.background } : remotionSite ? { background: "black" } : {}),
       ...(audioPath ? { audio: { path: audioPath, offset: start, copy: !options.audio && Boolean(site?.audioPath) } } : {}),
       ...(beforeSample ? { beforeSample } : {}),
       ...(needsBeforeSample ? { needsBeforeSample } : {}),
@@ -401,14 +459,42 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
         spare = undefined;
         void unused?.then(({ page }) => page.page.close()).catch(() => {});
       },
+      ...(remotionAudio
+        ? {
+            afterRange: async (page: CapturePage["page"]) => {
+              Object.assign(assetsByFrame, await page.evaluate(() => (window as unknown as { __fv: FrameVeloPageApi }).__fv.remotionAssets()));
+            },
+          }
+        : {}),
       ...(options.ffmpegPath ? { ffmpegPath: options.ffmpegPath } : {}),
       ...(options.ffprobePath ? { ffprobePath: options.ffprobePath } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
     });
     if (result.page.hardwareFallback) log("hardware encoder unavailable for this configuration; Chrome chose its own encoder");
+    let { probe, bytes } = result;
+    if (remotionAudio && remotionApi && remotionSite) {
+      const a0 = performance.now();
+      const audioFile = path.join(path.dirname(finalOutput), `.${path.basename(finalOutput)}.${tag}.audio.m4a`);
+      const staging = path.join(path.dirname(finalOutput), `.${path.basename(finalOutput)}.${tag}.partial.mp4`);
+      try {
+        const mixed = await mixRemotionAudio(remotionApi, remotionSite, { assetsByFrame: assetsByFrame as Record<number, Array<{ type: string; [key: string]: unknown }>>, startFrame, frames, fps, width, height, output: audioFile });
+        if (mixed) {
+          await remuxWithAudio(videoOnly, mixed, staging, options.ffmpegPath);
+          probe = await probeVideo(staging, options.ffprobePath);
+          if (probe.packets !== frames || !probe.audioCodec) throw new Error(`Adding the audio left ${probe.packets} video packets (expected ${frames}) and audio ${probe.audioCodec ?? "missing"}.`);
+          await rename(staging, finalOutput);
+          log(`audio: mixed by remotion in ${Math.round(performance.now() - a0)} ms`);
+        } else {
+          await rename(videoOnly, finalOutput);
+        }
+        bytes = (await stat(finalOutput)).size;
+      } finally {
+        await Promise.all([videoOnly, audioFile, staging].map((f) => rm(f, { force: true })));
+      }
+    }
 
     return {
-      output: result.output,
+      output: remotionAudio ? finalOutput : result.output,
       frames,
       fps,
       width,
@@ -417,11 +503,11 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
       bitrate,
       mode: prepared.mode,
       driver: prepared.driver,
-      pipeline: useHyperFrames ? "hyperframes" : "page",
+      pipeline: remotionSite ? "remotion" : useHyperFrames ? "hyperframes" : "page",
       chrome: version,
       hardwareEncoder: !result.page.hardwareFallback,
-      audio: Boolean(result.probe.audioCodec),
-      bytes: result.bytes,
+      audio: Boolean(probe.audioCodec),
+      bytes,
       wallMs: Math.round(performance.now() - t0),
       renderMs: result.renderMs,
       stages: { compileMs: Math.round(compileMs), prepareMs: Math.round(prepareMs), renderMs: result.renderMs },
@@ -440,6 +526,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     await browser?.close().catch(() => {});
     await server?.close();
     await site?.close();
+    await remotionSite?.close();
   }
 }
 

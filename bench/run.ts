@@ -1,6 +1,6 @@
 // Benchmark FrameVelo against `hyperframes render` on this machine and write the results as JSON.
 //
-//   node bench/run.ts [--suite gsap,fixtures,workers,browser] [--repeats 3] [--fixtures <dir>] [--out <file>]
+//   node bench/run.ts [--suite gsap,fixtures,workers,browser,remotion] [--repeats 3] [--fixtures <dir>] [--out <file>]
 //
 // Suites:
 //   gsap      the GSAP showcase (bench/fixtures/gsap-showcase, 10 s) at 1080p and 4K: official
@@ -8,19 +8,24 @@
 //   fixtures  the official HyperFrames regression fixtures, once each, with per-frame PSNR
 //   workers   a 1516-frame video fixture with 1 to 4 FrameVelo pages
 //   browser   FrameVelo on chrome-headless-shell against full Google Chrome
+//   remotion  `remotion render` against FrameVelo: Remotion's hello-world template at 1080p and 4K,
+//             and test/fixtures/remotion (a 3 s 720p scene with <OffthreadVideo> and <Audio>, and a
+//             20 s 1080p motion-graphics showcase); median of --repeats
 //
 // Measure on an idle machine: other renders, screen recorders and video calls skew every number.
 // Fixtures come from the HyperFrames repository at the tag of the pinned producer version (cloned into
 // ~/.cache/framevelo/bench unless --fixtures points at packages/producer/tests of a checkout).
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { findChrome } from "../src/chrome.ts";
+import { prepareRemotionFixture } from "../scripts/remotion-fixture.ts";
 import { framePsnr, measure, medianRun, round, streams, type Measured } from "./measure.ts";
 
 const HYPERFRAMES = "0.8.186";
+const REMOTION = "4.0.539";
 /** Official regression fixtures (packages/producer/tests) that render on macOS without extra services. */
 export const FIXTURES = [
   "nested-subcomp-depth-3",
@@ -54,7 +59,7 @@ const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..")
 const cli = path.join(repo, "src", "cli.ts");
 const { values } = parseArgs({
   options: {
-    suite: { type: "string", default: "gsap,fixtures,workers,browser" },
+    suite: { type: "string", default: "gsap,fixtures,workers,browser,remotion" },
     repeats: { type: "string", default: "3" },
     fixtures: { type: "string" },
     out: { type: "string" },
@@ -122,6 +127,17 @@ function fixturesDir(): string {
   return path.join(checkout, "packages", "producer", "tests");
 }
 
+/** Remotion's hello-world template, scaffolded once into the cache at the pinned version. */
+function remotionTemplate(): string {
+  const dir = path.join(os.homedir(), ".cache", "framevelo", "bench", `remotion-hello-world-${REMOTION}`);
+  if (!existsSync(path.join(dir, "node_modules", "@remotion", "cli"))) {
+    say(`scaffolding Remotion's hello-world template ${REMOTION}...`);
+    rmSync(dir, { recursive: true, force: true });
+    execFileSync("npx", ["-y", `create-video@${REMOTION}`, "--yes", "--hello-world", dir], { stdio: "inherit" });
+  }
+  return dir;
+}
+
 const fixtureProject = (tests: string, name: string) =>
   existsSync(path.join(tests, name, "src", "index.html")) ? path.join(tests, name, "src") : path.join(tests, name);
 
@@ -143,7 +159,9 @@ const loadAverage = { start: round(load, 1), end: 0 };
 results.loadAverage = loadAverage;
 
 // Fetch the official CLI once so that its first measured run does not include the download.
-check(await measure("npx", ["-y", `hyperframes@${HYPERFRAMES}`, "--version"]), "installing the official CLI");
+if (["gsap", "fixtures"].some((suite) => suites.has(suite))) {
+  check(await measure("npx", ["-y", `hyperframes@${HYPERFRAMES}`, "--version"]), "installing the official CLI");
+}
 
 if (suites.has("gsap")) {
   const project = gsapProject();
@@ -244,6 +262,63 @@ if (suites.has("browser")) {
   } else {
     say("browser suite skipped: needs both chrome-headless-shell and Google Chrome");
   }
+}
+
+if (suites.has("remotion")) {
+  const hello = remotionTemplate();
+  const fixture = prepareRemotionFixture();
+  const remotionCli = (dir: string) => path.join(dir, "node_modules", "@remotion", "cli", "remotion-cli.js");
+  const cases = [
+    { name: "hello-world", label: "Hello World, 1080p", dir: hello, composition: "HelloWorld", extra: [] as string[] },
+    { name: "hello-world-4k", label: "Hello World, 4K", dir: hello, composition: "HelloWorld", extra: ["--scale", "2"] },
+    { name: "fixture", label: "Video + audio, 720p", dir: fixture, composition: "Scene", extra: [] as string[] },
+    { name: "showcase", label: "Showcase 20 s, 1080p", dir: fixture, composition: "Showcase", extra: [] as string[] },
+  ];
+  const renderers = [
+    // Remotion as users run it, and in BT.709 like FrameVelo (Remotion 4 defaults to BT.601, and the
+    // BT.709 conversion costs it an extra filter): the PSNR compares with the BT.709 render.
+    { renderer: "remotion", run: (c: (typeof cases)[number], o: string) => measure(process.execPath, [remotionCli(c.dir), "render", c.composition, o, "--log=error", ...c.extra], { cwd: c.dir }) },
+    {
+      renderer: "remotion-bt709",
+      run: (c: (typeof cases)[number], o: string) => measure(process.execPath, [remotionCli(c.dir), "render", c.composition, o, "--log=error", "--color-space=bt709", ...c.extra], { cwd: c.dir }),
+    },
+    { renderer: "framevelo", run: (c: (typeof cases)[number], o: string) => framevelo(c.dir, o, ["--composition", c.composition, ...c.extra]) },
+  ];
+  // Remotion fetches its browser on first use: keep that out of the measured runs.
+  check(await renderers[0]!.run(cases[2]!, path.join(work, "remotion-warmup.mp4")), "remotion render (warm-up)");
+  const runs = new Map<string, Run[]>();
+  for (let r = 0; r < repeats; r++) {
+    for (const c of cases) {
+      for (const { renderer, run } of renderers) {
+        const key = `${c.name}/${renderer}`;
+        const m = check(await run(c, path.join(work, `remotion-${c.name}-${renderer}.mp4`)), `remotion ${key}`);
+        runs.set(key, [...(runs.get(key) ?? []), keep(m)]);
+        say(`remotion ${key} #${r + 1}: ${m.wallS.toFixed(1)} s, ${m.cpuS.toFixed(1)} s CPU, ${m.peakMb} MB`);
+      }
+    }
+  }
+  results.remotion = {
+    version: REMOTION,
+    rows: cases.flatMap((c) =>
+      renderers.map(({ renderer }) => {
+        const output = path.join(work, `remotion-${c.name}-${renderer}.mp4`);
+        const reference = path.join(work, `remotion-${c.name}-remotion-bt709.mp4`);
+        const psnr = renderer === "framevelo" ? framePsnr(output, reference) : null;
+        const info = streams(output);
+        return {
+          case: c.name,
+          label: c.label,
+          renderer,
+          ...medianRun(runs.get(`${c.name}/${renderer}`)!),
+          runs: runs.get(`${c.name}/${renderer}`),
+          frames: info.frames,
+          audio: info.audio,
+          mb: round(statSync(output).size / 1e6, 1),
+          ...(psnr ? { psnrAvg: round(psnr.average, 1), psnrMin: round(psnr.min, 1) } : {}),
+        };
+      }),
+    ),
+  };
 }
 
 loadAverage.end = round(os.loadavg()[0]!, 1);

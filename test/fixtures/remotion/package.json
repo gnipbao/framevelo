@@ -1,0 +1,11 @@
+{
+  "name": "framevelo-remotion-fixture",
+  "private": true,
+  "description": "Remotion project for FrameVelo's integration tests and benchmarks. Install with: npm ci --prefix test/fixtures/remotion",
+  "dependencies": {
+    "@remotion/cli": "4.0.539",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.539"
+  }
+}
