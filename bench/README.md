@@ -16,7 +16,7 @@ npm run bench:report
 | `fixtures` | The official HyperFrames regression fixtures, once each, with per-frame PSNR against the official output |
 | `workers` | A 1516-frame video fixture with `--workers 1` to `4` |
 | `browser` | FrameVelo on `chrome-headless-shell` against full Google Chrome |
-| `remotion` | `remotion render` against FrameVelo: Remotion's hello-world template (scaffolded once into `~/.cache/framevelo/bench`) at 1080p and 4K, and [`test/fixtures/remotion`](../test/fixtures/remotion), a 3 s video-and-audio scene and a 20 s motion-graphics showcase |
+| `remotion` | `remotion render`, as it runs by default and with `--color-space=bt709` (the PSNR reference: the same colour conversion as FrameVelo), against FrameVelo: Remotion's hello-world template (scaffolded once into `~/.cache/framevelo/bench`) at 1080p and 4K, and [`test/fixtures/remotion`](../test/fixtures/remotion), a 3 s video-and-audio scene and a 20 s motion-graphics showcase |
 
 ```bash
 node bench/run.ts --suite gsap --repeats 5 --out bench/results/gsap-only.json

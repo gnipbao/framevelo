@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "date": "2026-10-31T05:54:38.222Z",
+  "date": "2026-10-31T06:53:39.721Z",
   "framevelo": {
-    "version": "0.5.0",
-    "commit": "f65ddd1"
+    "version": "0.6.0",
+    "commit": "b8c95ec"
   },
   "hyperframes": "0.8.186",
   "machine": {
@@ -18,8 +18,8 @@
   },
   "repeats": 3,
   "loadAverage": {
-    "start": 2.7,
-    "end": 8.7
+    "start": 3.6,
+    "end": 11.2
   },
   "remotion": {
     "version": "4.0.539",
@@ -28,24 +28,24 @@
         "case": "hello-world",
         "label": "Hello World, 1080p",
         "renderer": "remotion",
-        "wallS": 3.02,
-        "cpuS": 11.6,
-        "peakMb": 2933,
+        "wallS": 3.5,
+        "cpuS": 12.8,
+        "peakMb": 2924,
         "runs": [
           {
-            "wallS": 3.54,
-            "cpuS": 13.1,
-            "peakMb": 2917
+            "wallS": 4.14,
+            "cpuS": 13.9,
+            "peakMb": 2703
           },
           {
-            "wallS": 3.02,
-            "cpuS": 11.6,
-            "peakMb": 2933
+            "wallS": 3.32,
+            "cpuS": 12.4,
+            "peakMb": 2929
           },
           {
-            "wallS": 3.01,
-            "cpuS": 11.8,
-            "peakMb": 2933
+            "wallS": 3.5,
+            "cpuS": 12.8,
+            "peakMb": 2924
           }
         ],
         "frames": 150,
@@ -55,55 +55,111 @@
       {
         "case": "hello-world",
         "label": "Hello World, 1080p",
-        "renderer": "framevelo",
-        "wallS": 2.74,
-        "cpuS": 3.9,
-        "peakMb": 849,
+        "renderer": "remotion-bt709",
+        "wallS": 3.39,
+        "cpuS": 18.2,
+        "peakMb": 2925,
         "runs": [
           {
-            "wallS": 2.79,
-            "cpuS": 3.9,
-            "peakMb": 839
+            "wallS": 3.7,
+            "cpuS": 17.6,
+            "peakMb": 2701
           },
           {
-            "wallS": 2.6,
-            "cpuS": 3.5,
-            "peakMb": 815
+            "wallS": 3.32,
+            "cpuS": 18.4,
+            "peakMb": 2923
           },
           {
-            "wallS": 2.74,
+            "wallS": 3.39,
+            "cpuS": 18.2,
+            "peakMb": 2925
+          }
+        ],
+        "frames": 150,
+        "audio": false,
+        "mb": 0.5
+      },
+      {
+        "case": "hello-world",
+        "label": "Hello World, 1080p",
+        "renderer": "framevelo",
+        "wallS": 2.83,
+        "cpuS": 3.8,
+        "peakMb": 840,
+        "runs": [
+          {
+            "wallS": 2.95,
+            "cpuS": 3.7,
+            "peakMb": 726
+          },
+          {
+            "wallS": 2.76,
             "cpuS": 3.9,
-            "peakMb": 849
+            "peakMb": 836
+          },
+          {
+            "wallS": 2.83,
+            "cpuS": 3.8,
+            "peakMb": 840
           }
         ],
         "frames": 150,
         "audio": false,
         "mb": 1.8,
-        "psnrAvg": 43.3,
-        "psnrMin": 43
+        "psnrAvg": 57.1,
+        "psnrMin": 51
       },
       {
         "case": "hello-world-4k",
         "label": "Hello World, 4K",
         "renderer": "remotion",
-        "wallS": 6.1,
-        "cpuS": 29.6,
-        "peakMb": 5401,
+        "wallS": 6.21,
+        "cpuS": 32.1,
+        "peakMb": 5302,
         "runs": [
           {
-            "wallS": 6.1,
-            "cpuS": 29.6,
-            "peakMb": 5401
+            "wallS": 6.7,
+            "cpuS": 31.6,
+            "peakMb": 5338
           },
           {
-            "wallS": 6.25,
-            "cpuS": 32.2,
-            "peakMb": 5307
+            "wallS": 6.08,
+            "cpuS": 30.1,
+            "peakMb": 5335
           },
           {
-            "wallS": 5.78,
-            "cpuS": 30.7,
-            "peakMb": 5376
+            "wallS": 6.21,
+            "cpuS": 32.1,
+            "peakMb": 5302
+          }
+        ],
+        "frames": 150,
+        "audio": false,
+        "mb": 1.3
+      },
+      {
+        "case": "hello-world-4k",
+        "label": "Hello World, 4K",
+        "renderer": "remotion-bt709",
+        "wallS": 7.65,
+        "cpuS": 53.9,
+        "peakMb": 5430,
+        "runs": [
+          {
+            "wallS": 7.8,
+            "cpuS": 52.6,
+            "peakMb": 5148
+          },
+          {
+            "wallS": 7.51,
+            "cpuS": 51.8,
+            "peakMb": 5511
+          },
+          {
+            "wallS": 7.65,
+            "cpuS": 53.9,
+            "peakMb": 5430
           }
         ],
         "frames": 150,
@@ -114,54 +170,82 @@
         "case": "hello-world-4k",
         "label": "Hello World, 4K",
         "renderer": "framevelo",
-        "wallS": 4.73,
+        "wallS": 4.86,
         "cpuS": 4.6,
-        "peakMb": 849,
+        "peakMb": 850,
         "runs": [
           {
-            "wallS": 4.72,
+            "wallS": 4.86,
             "cpuS": 4.5,
-            "peakMb": 850
+            "peakMb": 853
           },
           {
-            "wallS": 4.73,
+            "wallS": 4.9,
             "cpuS": 4.6,
-            "peakMb": 849
+            "peakMb": 845
           },
           {
-            "wallS": 4.75,
-            "cpuS": 4.5,
-            "peakMb": 845
+            "wallS": 4.86,
+            "cpuS": 4.6,
+            "peakMb": 850
           }
         ],
         "frames": 150,
         "audio": false,
         "mb": 3.7,
-        "psnrAvg": 40.6,
-        "psnrMin": 35.3
+        "psnrAvg": 50.5,
+        "psnrMin": 35.9
       },
       {
         "case": "fixture",
         "label": "Video + audio, 720p",
         "renderer": "remotion",
-        "wallS": 3.23,
-        "cpuS": 11.7,
-        "peakMb": 2750,
+        "wallS": 3.6,
+        "cpuS": 11.4,
+        "peakMb": 2725,
         "runs": [
           {
-            "wallS": 3.2,
-            "cpuS": 10.1,
-            "peakMb": 2762
+            "wallS": 4.78,
+            "cpuS": 12.4,
+            "peakMb": 2734
           },
           {
-            "wallS": 3.23,
-            "cpuS": 11.7,
-            "peakMb": 2750
+            "wallS": 3.6,
+            "cpuS": 11.4,
+            "peakMb": 2725
           },
           {
-            "wallS": 3.23,
-            "cpuS": 11.8,
-            "peakMb": 2743
+            "wallS": 3.37,
+            "cpuS": 10.9,
+            "peakMb": 2700
+          }
+        ],
+        "frames": 90,
+        "audio": true,
+        "mb": 0.6
+      },
+      {
+        "case": "fixture",
+        "label": "Video + audio, 720p",
+        "renderer": "remotion-bt709",
+        "wallS": 3.8,
+        "cpuS": 13.6,
+        "peakMb": 2752,
+        "runs": [
+          {
+            "wallS": 3.91,
+            "cpuS": 15.1,
+            "peakMb": 2754
+          },
+          {
+            "wallS": 3.8,
+            "cpuS": 13.6,
+            "peakMb": 2752
+          },
+          {
+            "wallS": 2.99,
+            "cpuS": 12.2,
+            "peakMb": 2720
           }
         ],
         "frames": 90,
@@ -172,54 +256,54 @@
         "case": "fixture",
         "label": "Video + audio, 720p",
         "renderer": "framevelo",
-        "wallS": 3.48,
-        "cpuS": 4.5,
-        "peakMb": 847,
+        "wallS": 3.59,
+        "cpuS": 4.7,
+        "peakMb": 840,
         "runs": [
           {
-            "wallS": 3.52,
+            "wallS": 3.55,
+            "cpuS": 4.6,
+            "peakMb": 841
+          },
+          {
+            "wallS": 3.82,
+            "cpuS": 4.8,
+            "peakMb": 840
+          },
+          {
+            "wallS": 3.59,
             "cpuS": 4.7,
-            "peakMb": 843
-          },
-          {
-            "wallS": 3.48,
-            "cpuS": 4.5,
-            "peakMb": 847
-          },
-          {
-            "wallS": 3.46,
-            "cpuS": 4.5,
-            "peakMb": 845
+            "peakMb": 840
           }
         ],
         "frames": 90,
         "audio": true,
         "mb": 0.7,
-        "psnrAvg": 43.4,
-        "psnrMin": 42.2
+        "psnrAvg": 47.4,
+        "psnrMin": 45.1
       },
       {
         "case": "showcase",
         "label": "Showcase 20 s, 1080p",
         "renderer": "remotion",
-        "wallS": 14.41,
-        "cpuS": 113.9,
-        "peakMb": 4184,
+        "wallS": 15.81,
+        "cpuS": 116.8,
+        "peakMb": 3594,
         "runs": [
           {
-            "wallS": 14.88,
-            "cpuS": 113.2,
-            "peakMb": 4198
+            "wallS": 14.53,
+            "cpuS": 111.9,
+            "peakMb": 3887
           },
           {
-            "wallS": 14.41,
-            "cpuS": 113.9,
-            "peakMb": 4184
+            "wallS": 18.16,
+            "cpuS": 120.8,
+            "peakMb": 3443
           },
           {
-            "wallS": 13.85,
-            "cpuS": 113.1,
-            "peakMb": 4195
+            "wallS": 15.81,
+            "cpuS": 116.8,
+            "peakMb": 3594
           }
         ],
         "frames": 600,
@@ -229,32 +313,60 @@
       {
         "case": "showcase",
         "label": "Showcase 20 s, 1080p",
-        "renderer": "framevelo",
-        "wallS": 12.93,
-        "cpuS": 16.2,
-        "peakMb": 1313,
+        "renderer": "remotion-bt709",
+        "wallS": 17.76,
+        "cpuS": 137,
+        "peakMb": 3590,
         "runs": [
           {
-            "wallS": 12.83,
+            "wallS": 16.56,
+            "cpuS": 130.7,
+            "peakMb": 4182
+          },
+          {
+            "wallS": 17.76,
+            "cpuS": 137,
+            "peakMb": 3590
+          },
+          {
+            "wallS": 18.58,
+            "cpuS": 140.8,
+            "peakMb": 3624
+          }
+        ],
+        "frames": 600,
+        "audio": true,
+        "mb": 12.3
+      },
+      {
+        "case": "showcase",
+        "label": "Showcase 20 s, 1080p",
+        "renderer": "framevelo",
+        "wallS": 13.44,
+        "cpuS": 16.5,
+        "peakMb": 1272,
+        "runs": [
+          {
+            "wallS": 13.1,
             "cpuS": 16,
-            "peakMb": 1259
+            "peakMb": 1261
           },
           {
-            "wallS": 12.95,
+            "wallS": 13.44,
             "cpuS": 16.5,
-            "peakMb": 1274
+            "peakMb": 1272
           },
           {
-            "wallS": 12.93,
-            "cpuS": 16.2,
-            "peakMb": 1313
+            "wallS": 13.62,
+            "cpuS": 17.1,
+            "peakMb": 1254
           }
         ],
         "frames": 600,
         "audio": true,
         "mb": 31.8,
-        "psnrAvg": 41.5,
-        "psnrMin": 40.7
+        "psnrAvg": 45.2,
+        "psnrMin": 43.1
       }
     ]
   }

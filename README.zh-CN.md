@@ -26,7 +26,7 @@ seek(t) ─► drawElementImage（DOM）/ canvas ─► VideoFrame ─► WebCod
 - 渲染一段 10 秒的 GSAP 合成，**4K 比 `hyperframes render` 快 3.8 倍，1080p 快 2.0 倍**；4K 下 CPU 时间只有官方的 1/19，峰值内存少 76%。
 - **画面一致。**在 24 个 HyperFrames 官方回归用例上，23 个与官方渲染的 PSNR 在 40 dB 以上；合计快 1.6 倍，CPU 时间为官方的 1/2.1，峰值内存少 49%。
 - **HyperFrames 走官方管线。**字体、子合成、片段窗口、`<video>` 帧、着色器转场和混音都来自 `@hyperframes/producer`，FrameVelo 只替换采集和编码。
-- **也支持 Remotion 项目。**同样的项目，和 `remotion render` 相比，FrameVelo 的 CPU 时间少 2.6–7 倍、峰值内存少 69–84%，耗时基本持平（0.9–1.3 倍）：Remotion 用多个标签页并行截 JPEG、把 CPU 跑满，FrameVelo 把 CPU 留给别的事。打包、`<OffthreadVideo>` 帧和混音仍由 Remotion 自己完成，音频逐采样一致。
+- **也支持 Remotion 项目。**同样的项目，和 `remotion render` 相比，FrameVelo 的 CPU 时间少 2.4–7 倍、峰值内存少 65–84%，耗时持平或更短（速度 1.0–1.3 倍；和颜色与 FrameVelo 一致的 `--color-space=bt709` 相比为 1.1–1.6 倍）：Remotion 用多个标签页并行截 JPEG、把 CPU 跑满，FrameVelo 把 CPU 留给别的事。打包、`<OffthreadVideo>` 帧和混音仍由 Remotion 自己完成，音频逐采样一致。
 - **结果可靠。**编码前逐区间与原生截图比对，不一致的区间自动改用截图；输出用 ffprobe 校验后原子写入。
 - **为 Agent 准备好。**MCP 服务（`framevelo mcp`）、Claude Code 插件与 skill，以及给只能用 shell 的 Agent 的 `--json` 输出。
 

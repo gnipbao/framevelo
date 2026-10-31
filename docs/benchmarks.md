@@ -12,7 +12,7 @@ FrameVelo against the official `hyperframes render` 0.8.186 and `remotion render
 | Suites | Run | FrameVelo | Load average (1 minute, before → after) |
 |---|---|---|---|
 | gsap, fixtures, workers, browser | [2026-10-24](../bench/results/2026-10-24-m3pro.json) | 0.4.0 (c055ded) | 3.9 → 6.2 |
-| remotion | [2026-10-31](../bench/results/2026-10-31-m3pro-remotion.json) | 0.5.0 (f65ddd1) | 2.7 → 8.7 |
+| remotion | [2026-10-31](../bench/results/2026-10-31-m3pro-remotion.json) | 0.6.0 (b8c95ec) | 3.6 → 11.2 |
 
 **Method.** Each render runs alone. Wall time, CPU time (user + system) and peak resident memory cover the whole process tree (Node, Chrome and its helpers, FFmpeg), sampled every 200 ms. Quality is per-frame PSNR of the FrameVelo output against the official output. The machine is a working desktop rather than a lab box (see the load average above), so expect a few percent of noise.
 
@@ -100,25 +100,29 @@ FrameVelo on the GSAP composition at 1080p with each browser. Median of 3 runs.
 
 ## Remotion
 
-`remotion render` 4.0.539 against FrameVelo on the same projects: Remotion's own hello-world template (`npx create-video --hello-world`, the `HelloWorld` composition, 5 s) at 1080p and at 4K (`--scale 2` for both), and [`test/fixtures/remotion`](../test/fixtures/remotion) at 720p, 3 s with an `<OffthreadVideo>` and an `<Audio>` with a volume curve. Both bundle the project with Remotion's CLI and mix the audio with Remotion's mixer; FrameVelo captures with `drawElementImage` and encodes on the hardware encoder where `remotion render` takes JPEG screenshots in several tabs and encodes with x264. Median of 3 interleaved runs.
+`remotion render` 4.0.539, as it runs by default and with `--color-space=bt709`, against FrameVelo on the same projects: Remotion's own hello-world template (`npx create-video --hello-world`, the `HelloWorld` composition, 5 s) at 1080p and at 4K (`--scale 2` for both), and two compositions of [`test/fixtures/remotion`](../test/fixtures/remotion): a 3 s scene at 720p with an `<OffthreadVideo>` and an `<Audio>` with a volume curve, and 20 s of motion graphics at 1080p (moving gradients, 40 shadowed cards, a per-letter title, two picture-in-picture videos, an audio bed). Both bundle the project with Remotion's CLI and mix the audio with Remotion's mixer; FrameVelo captures with `drawElementImage` and encodes on the hardware encoder where `remotion render` takes JPEG screenshots in several tabs and encodes with x264. FrameVelo writes BT.709; Remotion 4 converts with BT.601 by default, and with `--color-space=bt709` matches FrameVelo's colours at the cost of an extra conversion, so the PSNR column compares with that render. Median of 3 interleaved runs.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/bench-remotion-dark.svg">
   <img alt="Wall time, CPU time and peak memory of remotion render and FrameVelo on Remotion projects" src="assets/bench-remotion-light.svg" width="960">
 </picture>
 
-| Project | Renderer | Wall | CPU | Peak memory | File | PSNR vs remotion render |
+| Project | Renderer | Wall | CPU | Peak memory | File | PSNR vs `--color-space=bt709` |
 |---|---|---:|---:|---:|---:|---:|
-| Hello World, 1080p | `remotion render` | 3.0 s | 11.6 s | 2933 MB | 0.6 MB | reference |
-| Hello World, 1080p | **FrameVelo** | 2.7 s | 3.9 s | 849 MB | 1.8 MB | 43.3 / 43 dB |
-| Hello World, 4K | `remotion render` | 6.1 s | 29.6 s | 5401 MB | 1.3 MB | reference |
-| Hello World, 4K | **FrameVelo** | 4.7 s | 4.6 s | 849 MB | 3.7 MB | 40.6 / 35.3 dB |
-| Video + audio, 720p | `remotion render` | 3.2 s | 11.7 s | 2750 MB | 0.6 MB | reference |
-| Video + audio, 720p | **FrameVelo** | 3.5 s | 4.5 s | 847 MB | 0.7 MB | 43.4 / 42.2 dB |
-| Showcase 20 s, 1080p | `remotion render` | 14.4 s | 113.9 s | 4184 MB | 13 MB | reference |
-| Showcase 20 s, 1080p | **FrameVelo** | 12.9 s | 16.2 s | 1313 MB | 31.8 MB | 41.5 / 40.7 dB |
+| Hello World, 1080p | `remotion render` | 3.5 s | 12.8 s | 2924 MB | 0.6 MB |  |
+| Hello World, 1080p | `remotion render --color-space=bt709` | 3.4 s | 18.2 s | 2925 MB | 0.5 MB | reference |
+| Hello World, 1080p | **FrameVelo** | 2.8 s | 3.8 s | 840 MB | 1.8 MB | 57.1 / 51 dB |
+| Hello World, 4K | `remotion render` | 6.2 s | 32.1 s | 5302 MB | 1.3 MB |  |
+| Hello World, 4K | `remotion render --color-space=bt709` | 7.7 s | 53.9 s | 5430 MB | 1.3 MB | reference |
+| Hello World, 4K | **FrameVelo** | 4.9 s | 4.6 s | 850 MB | 3.7 MB | 50.5 / 35.9 dB |
+| Video + audio, 720p | `remotion render` | 3.6 s | 11.4 s | 2725 MB | 0.6 MB |  |
+| Video + audio, 720p | `remotion render --color-space=bt709` | 3.8 s | 13.6 s | 2752 MB | 0.6 MB | reference |
+| Video + audio, 720p | **FrameVelo** | 3.6 s | 4.7 s | 840 MB | 0.7 MB | 47.4 / 45.1 dB |
+| Showcase 20 s, 1080p | `remotion render` | 15.8 s | 116.8 s | 3594 MB | 13 MB |  |
+| Showcase 20 s, 1080p | `remotion render --color-space=bt709` | 17.8 s | 137.0 s | 3590 MB | 12.3 MB | reference |
+| Showcase 20 s, 1080p | **FrameVelo** | 13.4 s | 16.5 s | 1272 MB | 31.8 MB | 45.2 / 43.1 dB |
 
-- Hello World, 1080p: 1.1× faster, 3.0× less CPU, 71% less peak memory.
-- Hello World, 4K: 1.3× faster, 6.4× less CPU, 84% less peak memory.
-- Video + audio, 720p: 0.9× faster, 2.6× less CPU, 69% less peak memory.
-- Showcase 20 s, 1080p: 1.1× faster, 7.0× less CPU, 69% less peak memory.
+- Hello World, 1080p: against `remotion render` as it runs by default, 1.2× the speed, 3.4× less CPU, 71% less peak memory; against `--color-space=bt709`, 1.2× the speed, 4.8× less CPU, 71% less peak memory.
+- Hello World, 4K: against `remotion render` as it runs by default, 1.3× the speed, 7.0× less CPU, 84% less peak memory; against `--color-space=bt709`, 1.6× the speed, 11.7× less CPU, 84% less peak memory.
+- Video + audio, 720p: against `remotion render` as it runs by default, 1.0× the speed, 2.4× less CPU, 69% less peak memory; against `--color-space=bt709`, 1.1× the speed, 2.9× less CPU, 69% less peak memory.
+- Showcase 20 s, 1080p: against `remotion render` as it runs by default, 1.2× the speed, 7.1× less CPU, 65% less peak memory; against `--color-space=bt709`, 1.3× the speed, 8.3× less CPU, 65% less peak memory.

@@ -405,11 +405,14 @@ ${results.browser.map((r) => `| ${r.browser} | ${f1(r.wallS)} s | ${f1(r.cpuS)} 
 if (results.remotion) {
   const r = results.remotion;
   const cases = [...new Set(r.rows.map((row) => row.case))];
-  const pair = (c: string) => ({ remotion: r.rows.find((row) => row.case === c && row.renderer === "remotion")!, framevelo: r.rows.find((row) => row.case === c && row.renderer === "framevelo")! });
+  const row = (c: string, renderer: string) => r.rows.find((x) => x.case === c && x.renderer === renderer)!;
+  /** "1.2× the speed, 3.4× less CPU, 71% less peak memory" of FrameVelo against another renderer. */
+  const against = (other: (typeof r.rows)[number], framevelo: (typeof r.rows)[number]) =>
+    `${(other.wallS / framevelo.wallS).toFixed(1)}× the speed, ${(other.cpuS / framevelo.cpuS).toFixed(1)}× less CPU, ${Math.round((1 - framevelo.peakMb / other.peakMb) * 100)}% less peak memory`;
   md += `
 ## Remotion
 
-\`remotion render\` ${r.version}, as it runs by default and with \`--color-space=bt709\`, against FrameVelo on the same projects: Remotion's own hello-world template (\`npx create-video --hello-world\`, the \`HelloWorld\` composition, 5 s) at 1080p and at 4K (\`--scale 2\` for both), and [\`test/fixtures/remotion\`](../test/fixtures/remotion) at 720p, 3 s with an \`<OffthreadVideo>\` and an \`<Audio>\` with a volume curve. Both bundle the project with Remotion's CLI and mix the audio with Remotion's mixer; FrameVelo captures with \`drawElementImage\` and encodes on the hardware encoder where \`remotion render\` takes JPEG screenshots in several tabs and encodes with x264. FrameVelo writes BT.709; Remotion 4 converts with BT.601 by default, and with \`--color-space=bt709\` matches FrameVelo's colours at the cost of an extra conversion, so the PSNR column compares with that render. Median of ${repeatsOf("remotion")} interleaved runs.
+\`remotion render\` ${r.version}, as it runs by default and with \`--color-space=bt709\`, against FrameVelo on the same projects: Remotion's own hello-world template (\`npx create-video --hello-world\`, the \`HelloWorld\` composition, 5 s) at 1080p and at 4K (\`--scale 2\` for both), and two compositions of [\`test/fixtures/remotion\`](../test/fixtures/remotion): a 3 s scene at 720p with an \`<OffthreadVideo>\` and an \`<Audio>\` with a volume curve, and 20 s of motion graphics at 1080p (moving gradients, 40 shadowed cards, a per-letter title, two picture-in-picture videos, an audio bed). Both bundle the project with Remotion's CLI and mix the audio with Remotion's mixer; FrameVelo captures with \`drawElementImage\` and encodes on the hardware encoder where \`remotion render\` takes JPEG screenshots in several tabs and encodes with x264. FrameVelo writes BT.709; Remotion 4 converts with BT.601 by default, and with \`--color-space=bt709\` matches FrameVelo's colours at the cost of an extra conversion, so the PSNR column compares with that render. Median of ${repeatsOf("remotion")} interleaved runs.
 
 ${picture("bench-remotion", "Wall time, CPU time and peak memory of remotion render and FrameVelo on Remotion projects")}
 
@@ -424,8 +427,9 @@ ${r.rows
 
 ${cases
   .map((c) => {
-    const { remotion, framevelo } = pair(c);
-    return `- ${remotion.label}, against \`remotion render\` as it runs by default: ${(remotion.wallS / framevelo.wallS).toFixed(1)}× the speed, ${(remotion.cpuS / framevelo.cpuS).toFixed(1)}× less CPU, ${Math.round((1 - framevelo.peakMb / remotion.peakMb) * 100)}% less peak memory.`;
+    const framevelo = row(c, "framevelo");
+    const bt709 = row(c, "remotion-bt709");
+    return `- ${framevelo.label}: against \`remotion render\` as it runs by default, ${against(row(c, "remotion"), framevelo)}${bt709 ? `; against \`--color-space=bt709\`, ${against(bt709, framevelo)}` : ""}.`;
   })
   .join("\n")}
 `;
