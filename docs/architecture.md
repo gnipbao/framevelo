@@ -146,13 +146,19 @@ the project's own Remotion, loaded from the project, so that bundle, server and 
    track is stream-copied in. On the test fixture the audio is sample-identical to `remotion render`.
 
 Remotion renders whole frames, so sub-frame motion blur does not apply. The backdrop is black, as in
-Remotion's JPEG renders.
+Remotion's JPEG renders. FrameVelo encodes BT.709 (checked per platform by a colour-patch test);
+`remotion render` converts with BT.601 unless given `--color-space=bt709`, which is how the tests and
+the benchmark render their Remotion references.
 
 ## Parallel pages
 
-Frames driven from Node (video injection, screenshot intervals) cost a few protocol round trips each
-and leave the GPU mostly idle, so they are latency-bound where in-page loops are GPU-bound. When a
-render has at least 200 such frames per extra page (up to `--workers`, by default a third of the
+Frames driven from Node through the page (HyperFrames video injection) cost a few protocol round
+trips each and leave the GPU mostly idle, so they are latency-bound where in-page loops are GPU-bound.
+Screenshot frames do not count: Chrome serializes screenshot work, a second page gained about 6% on
+them, and on a CI runner two pages taking screenshots at once stalled; screenshots are taken one at a
+time. Parallel pages also gained little on Remotion projects, which are mostly GPU-bound (12.9 s to
+11.0 s on a 20 s showcase for a third more memory), so they stay off there. When a render has at least
+200 page-driven frames per extra page (up to `--workers`, by default a third of the
 cores, at most 4), more pages open on the same composition while the main page starts verifying, and
 take verification samples from a shared queue as they come up. After routing, the range is split into
 contiguous parts, one per page:

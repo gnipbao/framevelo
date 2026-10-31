@@ -79,7 +79,7 @@ framevelo render examples/canvas-particles -o particles.mp4 --codec hevc --subfr
 framevelo render my-remotion-project/ --composition MyComp -o out.mp4 --props '{"title":"Hello"}'
 ```
 
-Remotion 相关的部分都交给项目自己的 Remotion：它的 CLI 打包项目（`remotion.config.ts` 照常生效），它的渲染器提供打包结果和 `<OffthreadVideo>` 的视频帧，它的混音器根据每帧播放的内容生成音频。FrameVelo 挂载合成（含 `calculateMetadata()` 和解析后的 props），逐帧驱动，只替换采集和编码。项目需要先装好依赖；支持 Remotion 4（测试版本 4.0.539）。Remotion 按整帧渲染，所以 `--subframes` 不起作用，运动模糊请在合成里用 `<CameraMotionBlur>`。项目本身照常遵守 Remotion 的许可证。
+Remotion 相关的部分都交给项目自己的 Remotion：它的 CLI 打包项目（`remotion.config.ts` 照常生效），它的渲染器提供打包结果和 `<OffthreadVideo>` 的视频帧，它的混音器根据每帧播放的内容生成音频。FrameVelo 挂载合成（含 `calculateMetadata()` 和解析后的 props），逐帧驱动，只替换采集和编码。项目需要先装好依赖；支持 Remotion 4（测试版本 4.0.539）。Remotion 按整帧渲染，所以 `--subframes` 不起作用，运动模糊请在合成里用 `<CameraMotionBlur>`。FrameVelo 输出并标注 BT.709（高清视频的色彩标准）；`remotion render` 默认按 BT.601 转换，加 `--color-space=bt709` 后两者颜色一致。项目本身照常遵守 Remotion 的许可证。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/bench-remotion-dark.svg">

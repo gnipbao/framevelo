@@ -79,7 +79,7 @@ Point FrameVelo at a Remotion project, its directory or its entry file, and name
 framevelo render my-remotion-project/ --composition MyComp -o out.mp4 --props '{"title":"Hello"}'
 ```
 
-The project's own Remotion does the Remotion parts. Its CLI bundles the project, so `remotion.config.ts` applies; its renderer serves the bundle and the `<OffthreadVideo>` frames; its mixer makes the audio from what each frame plays. FrameVelo mounts the composition (with `calculateMetadata()` and the resolved props), drives it frame by frame, and replaces capture and encoding. The project's dependencies must be installed; Remotion 4 is supported (tested with 4.0.539). Remotion renders whole frames, so `--subframes` has no effect: blur inside the composition with `<CameraMotionBlur>`. Remotion's own license applies to the project as usual.
+The project's own Remotion does the Remotion parts. Its CLI bundles the project, so `remotion.config.ts` applies; its renderer serves the bundle and the `<OffthreadVideo>` frames; its mixer makes the audio from what each frame plays. FrameVelo mounts the composition (with `calculateMetadata()` and the resolved props), drives it frame by frame, and replaces capture and encoding. The project's dependencies must be installed; Remotion 4 is supported (tested with 4.0.539). Remotion renders whole frames, so `--subframes` has no effect: blur inside the composition with `<CameraMotionBlur>`. FrameVelo writes BT.709, the colour standard for HD video, and tags it; `remotion render` converts with BT.601 by default, so the two match with `--color-space=bt709`. Remotion's own license applies to the project as usual.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/bench-remotion-dark.svg">

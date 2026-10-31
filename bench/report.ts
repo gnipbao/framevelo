@@ -207,6 +207,7 @@ function gsapChart(theme: Theme, rows: GsapRow[]): string {
 
 const REMOTION_RENDERERS = [
   { key: "remotion", label: "remotion render", color: (t: Theme) => t.official },
+  { key: "remotion-bt709", label: "remotion render --color-space=bt709", color: (t: Theme) => t.officialGpu },
   { key: "framevelo", label: "FrameVelo", color: (t: Theme) => t.framevelo },
 ] as const;
 
@@ -408,23 +409,23 @@ if (results.remotion) {
   md += `
 ## Remotion
 
-\`remotion render\` ${r.version} against FrameVelo on the same projects: Remotion's own hello-world template (\`npx create-video --hello-world\`, the \`HelloWorld\` composition, 5 s) at 1080p and at 4K (\`--scale 2\` for both), and [\`test/fixtures/remotion\`](../test/fixtures/remotion) at 720p, 3 s with an \`<OffthreadVideo>\` and an \`<Audio>\` with a volume curve. Both bundle the project with Remotion's CLI and mix the audio with Remotion's mixer; FrameVelo captures with \`drawElementImage\` and encodes on the hardware encoder where \`remotion render\` takes JPEG screenshots in several tabs and encodes with x264. Median of ${repeatsOf("remotion")} interleaved runs.
+\`remotion render\` ${r.version}, as it runs by default and with \`--color-space=bt709\`, against FrameVelo on the same projects: Remotion's own hello-world template (\`npx create-video --hello-world\`, the \`HelloWorld\` composition, 5 s) at 1080p and at 4K (\`--scale 2\` for both), and [\`test/fixtures/remotion\`](../test/fixtures/remotion) at 720p, 3 s with an \`<OffthreadVideo>\` and an \`<Audio>\` with a volume curve. Both bundle the project with Remotion's CLI and mix the audio with Remotion's mixer; FrameVelo captures with \`drawElementImage\` and encodes on the hardware encoder where \`remotion render\` takes JPEG screenshots in several tabs and encodes with x264. FrameVelo writes BT.709; Remotion 4 converts with BT.601 by default, and with \`--color-space=bt709\` matches FrameVelo's colours at the cost of an extra conversion, so the PSNR column compares with that render. Median of ${repeatsOf("remotion")} interleaved runs.
 
 ${picture("bench-remotion", "Wall time, CPU time and peak memory of remotion render and FrameVelo on Remotion projects")}
 
-| Project | Renderer | Wall | CPU | Peak memory | File | PSNR vs remotion render |
+| Project | Renderer | Wall | CPU | Peak memory | File | PSNR vs \`--color-space=bt709\` |
 |---|---|---:|---:|---:|---:|---:|
 ${r.rows
   .map(
     (row) =>
-      `| ${row.label} | ${row.renderer === "framevelo" ? "**FrameVelo**" : "\`remotion render\`"} | ${f1(row.wallS)} s | ${f1(row.cpuS)} s | ${row.peakMb} MB | ${row.mb} MB | ${row.psnrAvg !== undefined ? `${row.psnrAvg} / ${row.psnrMin} dB` : "reference"} |`,
+      `| ${row.label} | ${row.renderer === "framevelo" ? "**FrameVelo**" : row.renderer === "remotion" ? "\`remotion render\`" : "\`remotion render --color-space=bt709\`"} | ${f1(row.wallS)} s | ${f1(row.cpuS)} s | ${row.peakMb} MB | ${row.mb} MB | ${row.psnrAvg !== undefined ? `${row.psnrAvg} / ${row.psnrMin} dB` : row.renderer === "remotion-bt709" ? "reference" : ""} |`,
   )
   .join("\n")}
 
 ${cases
   .map((c) => {
     const { remotion, framevelo } = pair(c);
-    return `- ${remotion.label}: ${(remotion.wallS / framevelo.wallS).toFixed(1)}× faster, ${(remotion.cpuS / framevelo.cpuS).toFixed(1)}× less CPU, ${Math.round((1 - framevelo.peakMb / remotion.peakMb) * 100)}% less peak memory.`;
+    return `- ${remotion.label}, against \`remotion render\` as it runs by default: ${(remotion.wallS / framevelo.wallS).toFixed(1)}× the speed, ${(remotion.cpuS / framevelo.cpuS).toFixed(1)}× less CPU, ${Math.round((1 - framevelo.peakMb / remotion.peakMb) * 100)}% less peak memory.`;
   })
   .join("\n")}
 `;

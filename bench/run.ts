@@ -275,8 +275,13 @@ if (suites.has("remotion")) {
     { name: "showcase", label: "Showcase 20 s, 1080p", dir: fixture, composition: "Showcase", extra: [] as string[] },
   ];
   const renderers = [
-    // BT.709 like FrameVelo (Remotion 4 defaults to BT.601), so that the PSNR compares like with like.
-    { renderer: "remotion", run: (c: (typeof cases)[number], o: string) => measure(process.execPath, [remotionCli(c.dir), "render", c.composition, o, "--log=error", "--color-space=bt709", ...c.extra], { cwd: c.dir }) },
+    // Remotion as users run it, and in BT.709 like FrameVelo (Remotion 4 defaults to BT.601, and the
+    // BT.709 conversion costs it an extra filter): the PSNR compares with the BT.709 render.
+    { renderer: "remotion", run: (c: (typeof cases)[number], o: string) => measure(process.execPath, [remotionCli(c.dir), "render", c.composition, o, "--log=error", ...c.extra], { cwd: c.dir }) },
+    {
+      renderer: "remotion-bt709",
+      run: (c: (typeof cases)[number], o: string) => measure(process.execPath, [remotionCli(c.dir), "render", c.composition, o, "--log=error", "--color-space=bt709", ...c.extra], { cwd: c.dir }),
+    },
     { renderer: "framevelo", run: (c: (typeof cases)[number], o: string) => framevelo(c.dir, o, ["--composition", c.composition, ...c.extra]) },
   ];
   // Remotion fetches its browser on first use: keep that out of the measured runs.
@@ -297,8 +302,8 @@ if (suites.has("remotion")) {
     rows: cases.flatMap((c) =>
       renderers.map(({ renderer }) => {
         const output = path.join(work, `remotion-${c.name}-${renderer}.mp4`);
-        const reference = path.join(work, `remotion-${c.name}-remotion.mp4`);
-        const psnr = renderer === "remotion" ? null : framePsnr(output, reference);
+        const reference = path.join(work, `remotion-${c.name}-remotion-bt709.mp4`);
+        const psnr = renderer === "framevelo" ? framePsnr(output, reference) : null;
         const info = streams(output);
         return {
           case: c.name,

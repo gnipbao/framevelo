@@ -79,7 +79,7 @@ Remotion プロジェクト（ディレクトリまたはエントリファイ�
 framevelo render my-remotion-project/ --composition MyComp -o out.mp4 --props '{"title":"Hello"}'
 ```
 
-Remotion に関わる部分はプロジェクト自身の Remotion が担当します。CLI がプロジェクトをバンドルし（`remotion.config.ts` も適用されます）、レンダラーがバンドルと `<OffthreadVideo>` のフレームを配信し、ミキサーが各フレームで再生されるものから音声を作ります。FrameVelo はコンポジションをマウントし（`calculateMetadata()` と解決済みの props を含む）、1 フレームずつ駆動して、キャプチャとエンコードだけを置き換えます。プロジェクトの依存関係はあらかじめインストールしておいてください。対応は Remotion 4 です（4.0.539 で検証）。Remotion はフレーム単位でレンダリングするため `--subframes` は効きません。モーションブラーはコンポジション内の `<CameraMotionBlur>` を使ってください。プロジェクトには通常どおり Remotion のライセンスが適用されます。
+Remotion に関わる部分はプロジェクト自身の Remotion が担当します。CLI がプロジェクトをバンドルし（`remotion.config.ts` も適用されます）、レンダラーがバンドルと `<OffthreadVideo>` のフレームを配信し、ミキサーが各フレームで再生されるものから音声を作ります。FrameVelo はコンポジションをマウントし（`calculateMetadata()` と解決済みの props を含む）、1 フレームずつ駆動して、キャプチャとエンコードだけを置き換えます。プロジェクトの依存関係はあらかじめインストールしておいてください。対応は Remotion 4 です（4.0.539 で検証）。Remotion はフレーム単位でレンダリングするため `--subframes` は効きません。モーションブラーはコンポジション内の `<CameraMotionBlur>` を使ってください。FrameVelo は HD 映像の色規格である BT.709 で出力してタグも付けます。`remotion render` は既定で BT.601 で変換するため、`--color-space=bt709` を付けると両者の色が一致します。プロジェクトには通常どおり Remotion のライセンスが適用されます。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/bench-remotion-dark.svg">

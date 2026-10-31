@@ -25,6 +25,10 @@
 
 ### Fixes
 
+- Parallel pages count only frames injected through the page (HyperFrames video). Chrome serializes
+  screenshot work, so a second page gained about 6% on screenshot frames, and on the macOS CI runner
+  two pages capturing at once stalled; screenshots now run one at a time, retried once on a fresh
+  protocol session.
 - Verification screenshots are taken at the element's CSS size. A screenshot scaled below 1x is
   rasterized at that scale, and on sharp content it failed verification against a full-size paint
   for no real difference, sending intervals to the slower screenshot route.
