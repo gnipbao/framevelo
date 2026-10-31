@@ -25,6 +25,11 @@
 
 ### Fixes
 
+- Windows: files are tagged with the colour range the encoder wrote. Chrome's software H.264 encoder
+  there writes full-range BT.709, which FrameVelo tagged limited range since 0.5.0, so players
+  stretched it: too much contrast and saturation, crushed shadows and clipped highlights. The muxer
+  now tags range, matrix and primaries from the encoder's own report (`decoderConfig.colorSpace`), and
+  the colour tests check what a player shows. Found by a new colour-patch test on the Windows runner.
 - Parallel pages count only frames injected through the page (HyperFrames video). Chrome serializes
   screenshot work, so a second page gained about 6% on screenshot frames, and on the macOS CI runner
   two pages capturing at once stalled; screenshots now run one at a time, retried once on a fresh

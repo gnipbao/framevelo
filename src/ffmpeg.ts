@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { promisify } from "node:util";
 import type { Codec } from "./options.ts";
+import type { EncodedColorSpace } from "./page-runtime.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -19,6 +20,25 @@ export interface MuxArgsOptions {
    */
   videoSeconds?: number;
   audioBitrate?: string;
+  /** The encoded stream's colour space as the encoder reported it (default: BT.709, limited range). */
+  colorSpace?: EncodedColorSpace;
+}
+
+/** WebCodecs colour names to H.264/HEVC VUI codes (ISO/IEC 23091-2) and FFmpeg tag names. */
+const MATRICES: Record<string, [number, string]> = { bt709: [1, "bt709"], bt470bg: [5, "bt470bg"], smpte170m: [6, "smpte170m"], "bt2020-ncl": [9, "bt2020nc"] };
+const PRIMARIES: Record<string, [number, string]> = { bt709: [1, "bt709"], bt470bg: [5, "bt470bg"], smpte170m: [6, "smpte170m"], bt2020: [9, "bt2020"], smpte432: [12, "smpte432"] };
+
+/**
+ * Tags for the stream: range, matrix and primaries as the encoder produced them, so that players
+ * decode its values as written (Chrome's software H.264 encoder on Windows writes full range, the
+ * others limited); the transfer is BT.709 SDR, which players expect from video, rather than the sRGB
+ * transfer Chrome reports for canvas frames.
+ */
+export function colorTags(colorSpace: EncodedColorSpace = {}) {
+  const [matrixCode, matrix] = MATRICES[colorSpace.matrix ?? ""] ?? MATRICES.bt709!;
+  const [primariesCode, primaries] = PRIMARIES[colorSpace.primaries ?? ""] ?? PRIMARIES.bt709!;
+  const fullRange = colorSpace.fullRange === true;
+  return { matrixCode, matrix, primariesCode, primaries, fullRange };
 }
 
 /** Time base of one frame as an FFmpeg rational: "1/30", or "1001/30000" for 29.97 fps. */
@@ -33,15 +53,16 @@ export function frameTimeBase(fps: number): string {
  * FFmpeg arguments that read the encoder's Annex-B stream from stdin and copy it into an MP4
  * without decoding or re-encoding.
  *
- * Bitstream filters: `*_metadata` rewrites the VUI to BT.709 SDR (Chrome tags canvas frames with
- * the sRGB transfer, which video players and editors do not expect; the colour options do the same
- * for the MP4 colr box), and `setts` gives frame N the
+ * Bitstream filters: `*_metadata` rewrites the VUI to the stream's colour space with the BT.709
+ * transfer (see colorTags; the colour options do the same for the MP4 colr box), and `setts` gives
+ * frame N the
  * timestamp N. Raw Annex-B carries no timestamps; without them `-shortest` drops the audio track.
  * Frame-index timestamps are exact because the encoder emits I and P frames only, in order.
  */
 export function buildMuxArgs(options: MuxArgsOptions): string[] {
   const { codec, fps, output, audio } = options;
-  const metadataFilter = `${codec === "hevc" ? "hevc" : "h264"}_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1`;
+  const tags = colorTags(options.colorSpace);
+  const metadataFilter = `${codec === "hevc" ? "hevc" : "h264"}_metadata=video_full_range_flag=${tags.fullRange ? 1 : 0}:colour_primaries=${tags.primariesCode}:transfer_characteristics=1:matrix_coefficients=${tags.matrixCode}`;
   const timestampFilter = `setts=ts=N:duration=1:time_base=${frameTimeBase(fps)}`;
   return [
     "-hide_banner",
@@ -67,13 +88,13 @@ export function buildMuxArgs(options: MuxArgsOptions): string[] {
     // The MP4 colr box comes from the stream parameters, which still carry Chrome's sRGB transfer:
     // without these, Apple players read sRGB from the container while the bitstream says BT.709.
     "-color_primaries",
-    "bt709",
+    tags.primaries,
     "-color_trc",
     "bt709",
     "-colorspace",
-    "bt709",
+    tags.matrix,
     "-color_range",
-    "tv",
+    tags.fullRange ? "pc" : "tv",
     ...(codec === "hevc" ? ["-tag:v", "hvc1"] : []),
     ...(audio
       ? options.audioEncoder === "copy"

@@ -69,9 +69,12 @@ reuse is byte-identical.
 
 `new VideoFrame(canvas)` goes to a WebCodecs `VideoEncoder` (`prefer-hardware`, Annex-B, keyframe every
 two seconds, bounded queue). Encoded chunks are batched to Node through a binding and piped into FFmpeg,
-which only copies the stream: `h264_metadata`/`hevc_metadata` rewrites the VUI to BT.709 SDR (Chrome
-tags canvas frames with the sRGB transfer) and `setts` gives frame N the timestamp N (raw Annex-B has
-none; the encoder emits only I and P frames, so this is exact). Audio is limited on its input with `-t`,
+which only copies the stream: `h264_metadata`/`hevc_metadata` rewrites the VUI with the BT.709
+transfer (Chrome tags canvas frames with sRGB, which players do not expect from video) and with the
+range, matrix and primaries the encoder reports for its output (`decoderConfig.colorSpace`: Chrome's
+software H.264 encoder on Windows writes full range, the others limited range). The muxer starts with
+the first encoded bytes, which that report precedes. `setts` gives frame N the timestamp N (raw
+Annex-B has none; the encoder emits only I and P frames, so this is exact). Audio is limited on its input with `-t`,
 never with `-shortest` or an output `-t`, which drop trailing video frames when the audio is shorter or
 starts before zero. The file is written under a temporary name, checked with ffprobe (exact packet
 count, size, audio present) and renamed.

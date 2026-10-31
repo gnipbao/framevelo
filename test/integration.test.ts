@@ -195,17 +195,21 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     assert.equal((await probeVideo(output)).packets, 30);
   });
 
-  test("colors are encoded with the BT.709 matrix the file is tagged with", async () => {
-    // Red, green, blue and mid-gray patches; expected YUV is BT.709, limited range.
+  test("colours come out as drawn, decoded with the tags the file carries", async () => {
+    // Red, green, blue and mid-grey patches. Encoders differ in range (Chrome's software encoder on
+    // Windows writes full range): what must hold is what a player shows from the file's own tags.
     const output = path.join(dir, "colors.mp4");
-    await render({ ...logging, input: path.join(fixtures, "color-patches.html"), output, frames: 3 });
-    const yuv = execFileSync("ffmpeg", ["-v", "error", "-i", output, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"]);
-    const [w, h] = [256, 64];
-    const sample = (x: number) => [yuv[32 * w + x]!, yuv[w * h + 16 * (w / 2) + x / 2]!, yuv[w * h + (w * h) / 4 + 16 * (w / 2) + x / 2]!];
-    const expected = { red: [63, 102, 240], green: [173, 42, 26], blue: [32, 240, 118], gray: [126, 128, 128] };
-    Object.values(expected).forEach((want, i) => {
-      const got = sample(i * 64 + 32);
-      assert.ok(got.every((v, c) => Math.abs(v - want[c]!) <= 3), `${Object.keys(expected)[i]}: YUV ${got.join(",")}, BT.709 ${want.join(",")}`);
+    const result = await render({ ...logging, input: path.join(fixtures, "color-patches.html"), output, frames: 3 });
+    const rgb = execFileSync("ffmpeg", ["-v", "error", "-i", output, "-frames:v", "1", "-vf", "scale=in_color_matrix=auto:in_range=auto,format=rgb24", "-f", "rawvideo", "-"]);
+    const tags = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "stream=color_space,color_range", "-of", "csv=p=0", output], { encoding: "utf8" }).trim();
+    const drawn = { red: [255, 0, 0], green: [0, 255, 0], blue: [0, 0, 255], grey: [128, 128, 128] };
+    Object.entries(drawn).forEach(([name, want], i) => {
+      const at = (32 * 256 + i * 64 + 32) * 3;
+      const got = [rgb[at]!, rgb[at + 1]!, rgb[at + 2]!];
+      assert.ok(
+        got.every((v, c) => Math.abs(v - want[c]!) <= 6),
+        `${name}: shown as ${got.join(",")}, drawn ${want.join(",")} (tags ${tags}; encoder ${JSON.stringify(result.page.colorSpace)})`,
+      );
     });
   });
 

@@ -74,6 +74,16 @@ export interface PageRenderStats {
   emptyChunks: number;
   /** Why paint reuse is off for this page, when it is. */
   reuseDisabledReason?: string;
+  /** Colour space of the encoded stream, as the encoder reports it (range and matrix vary by encoder). */
+  colorSpace?: EncodedColorSpace;
+}
+
+/** VideoColorSpaceInit of the encoder's output, as in EncodedVideoChunkMetadata.decoderConfig. */
+export interface EncodedColorSpace {
+  primaries?: string | null;
+  transfer?: string | null;
+  matrix?: string | null;
+  fullRange?: boolean | null;
 }
 
 /** The page-side API installed by `pageInstallRuntime`, reached as `window.__fv`. */
@@ -211,6 +221,8 @@ export function pageInstallRuntime(): void {
     __timelines?: Record<string, Timeline | undefined>;
     __fvChunk(base64: string): Promise<void>;
     __fvProgress(done: number): void;
+    /** Tells Node the encoded stream's colour space before its first bytes, for the container tags. */
+    __fvColorSpace?: (json: string) => void;
   };
   const w = window as unknown as W;
   if (w.__fv) return;
@@ -335,6 +347,8 @@ export function pageInstallRuntime(): void {
     frames: number;
     /** Timestamps of warm-up frames, whose chunks are dropped. */
     warmups: Set<number>;
+    /** The encoder's output colour space, once reported. */
+    colorSpace?: EncodedColorSpace;
     stats: { seekMs: number; paintMs: number; encodeWaitMs: number; transferWaitMs: number; reusedPaints: number; chunks: number; emptyChunks: number };
   }
   let session: Session | null = null;
@@ -838,7 +852,15 @@ export function pageInstallRuntime(): void {
     s.failed = new Promise<never>((_, reject) => (fail = reject));
     s.failed.catch(() => {});
     s.encoder = new VideoEncoder({
-      output: (chunk) => {
+      output: (chunk, metadata) => {
+        // Encoders differ in what they produce (Chrome's software H.264 encoder on Windows writes full
+        // range): the container is tagged from this, which reaches Node before the first bytes.
+        const colorSpace = metadata?.decoderConfig?.colorSpace;
+        if (colorSpace && !s.colorSpace) {
+          s.colorSpace = { primaries: colorSpace.primaries, transfer: colorSpace.transfer, matrix: colorSpace.matrix, fullRange: colorSpace.fullRange };
+          // Optional: an encoder callback that throws would lose this chunk.
+          w.__fvColorSpace?.(JSON.stringify(s.colorSpace));
+        }
         if (s.warmups.delete(chunk.timestamp)) return;
         s.stats.chunks++;
         if (chunk.byteLength === 0) s.stats.emptyChunks++;
@@ -1116,6 +1138,7 @@ export function pageInstallRuntime(): void {
       chunks: s.stats.chunks,
       emptyChunks: s.stats.emptyChunks,
       ...(state?.reuseBlocker && s.o.reusePaints ? { reuseDisabledReason: state.reuseBlocker } : {}),
+      ...(s.colorSpace ? { colorSpace: s.colorSpace } : {}),
     };
   }
 

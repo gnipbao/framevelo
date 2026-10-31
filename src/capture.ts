@@ -8,6 +8,7 @@ import { codecString, keyframeInterval, type Codec } from "./options.ts";
 import {
   pageBootstrap,
   pageInstallRuntime,
+  type EncodedColorSpace,
   type FrameVeloPageApi,
   type PageEncodeOptions,
   type PagePrepareOptions,
@@ -309,22 +310,30 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
   const files: string[] = [];
 
   const audioEncoder = job.audio ? (job.audio.copy ? "copy" : await detectAacEncoder(job.ffmpegPath)) : undefined;
-  let mux: MuxProcess | undefined = startMux(
-    buildMuxArgs({
-      codec: job.codec,
-      fps: job.fps,
-      output: staging,
-      ...(job.audio ? { audio: path.resolve(job.audio.path), audioOffset: job.audio.offset, videoSeconds: job.frames / job.fps } : {}),
-      ...(audioEncoder ? { audioEncoder } : {}),
-    }),
-    job.ffmpegPath,
-  );
+  // The muxer starts with the first encoded bytes: by then the encoder has reported the stream's
+  // colour space (range and matrix differ between encoders), which the container is tagged with.
+  let colorSpace: EncodedColorSpace | undefined;
+  let mux: MuxProcess | undefined;
+  const openMux = (): MuxProcess =>
+    (mux ??= startMux(
+      buildMuxArgs({
+        codec: job.codec,
+        fps: job.fps,
+        output: staging,
+        ...(job.audio ? { audio: path.resolve(job.audio.path), audioOffset: job.audio.offset, videoSeconds: job.frames / job.fps } : {}),
+        ...(audioEncoder ? { audioEncoder } : {}),
+        ...(colorSpace ? { colorSpace } : {}),
+      }),
+      job.ffmpegPath,
+    ));
   try {
-    const activeMux = mux;
     const streamDump = process.env.FRAMEVELO_DUMP_STREAM;
     if (streamDump) await writeFile(streamDump, "");
     const progress: number[] = [];
     const attach = async (page: Page, index: number, sink: (bytes: Buffer) => Promise<void>) => {
+      await page.exposeFunction("__fvColorSpace", (json: string) => {
+        colorSpace ??= JSON.parse(json) as EncodedColorSpace;
+      });
       await page.exposeFunction("__fvChunk", (base64: string) => sink(Buffer.from(base64, "base64")));
       await page.exposeFunction("__fvProgress", (done: number) => {
         progress[index] = done;
@@ -336,7 +345,7 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     const firstLaneSink = (lane: Lane) => async (bytes: Buffer) => {
       if (lane.part) return appendFile(lane.part, bytes);
       if (streamDump) await appendFile(streamDump, bytes);
-      await activeMux.write(bytes);
+      await openMux().write(bytes);
     };
     await attach(job.page, 0, firstLaneSink(main));
 
@@ -464,11 +473,11 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
       for (const lane of lanes) {
         for await (const chunk of createReadStream(lane.part!)) {
           if (streamDump) await appendFile(streamDump, chunk as Buffer);
-          await mux.write(chunk as Buffer);
+          await openMux().write(chunk as Buffer);
         }
       }
     }
-    await mux.finish();
+    await openMux().finish();
     mux = undefined;
 
     const probe = await probeVideo(staging, job.ffprobePath);

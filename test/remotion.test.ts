@@ -78,6 +78,30 @@ test("the mixed audio is copied in beside the video, never re-encoded or cut", (
   assert.equal(args.at(-1), "out.mp4");
 });
 
+/**
+ * Per-frame PSNR of what a player shows: each file decoded to RGB with its own colour tags. Two
+ * renderers that write different but correctly tagged ranges (limited, full) compare as equal.
+ */
+function shownPsnr(a: string, b: string): { average: number; min: number; frames: number } {
+  const rgb = "scale=in_color_matrix=auto:in_range=auto,format=rgb24";
+  const out = execFileSync(
+    "ffmpeg",
+    ["-hide_banner", "-i", a, "-i", b, "-lavfi", `[0:v]settb=1/30,setpts=N,${rgb}[x];[1:v]settb=1/30,setpts=N,${rgb}[y];[x][y]psnr=stats_file=-`, "-f", "null", "-"],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 << 20 },
+  );
+  const values = [...out.matchAll(/psnr_avg:(\S+)/g)].map((m) => (m[1] === "inf" ? 100 : Number(m[1])));
+  return { average: values.reduce((x, y) => x + y, 0) / values.length, min: Math.min(...values), frames: values.length };
+}
+
+/** RGB a player shows for the four patches of the Colors composition (first frame). */
+function shownPatches(file: string): number[][] {
+  const rgb = execFileSync("ffmpeg", ["-v", "error", "-i", file, "-frames:v", "1", "-vf", "scale=in_color_matrix=auto:in_range=auto,format=rgb24", "-f", "rawvideo", "-"]);
+  return [0, 1, 2, 3].map((i) => {
+    const at = (32 * 256 + i * 64 + 32) * 3;
+    return [rgb[at]!, rgb[at + 1]!, rgb[at + 2]!];
+  });
+}
+
 /** Colour tags of a file's video stream, for failure messages. */
 const colorTags = (file: string) =>
   execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "stream=color_space,color_primaries,color_transfer,color_range", "-of", "csv=p=0", file], { encoding: "utf8" }).trim();
@@ -140,28 +164,29 @@ describe("Remotion projects (integration)", { skip }, () => {
 
     const reference = path.join(dir, "scene.remotion.mp4");
     remotionRender("Scene", reference);
-    const psnr = framePsnr(output, reference);
-    assert.ok(psnr && psnr.frames === 90, "both renders decode to 90 frames");
+    // Compared as shown: FrameVelo may write full range (Windows' software encoder), Remotion limited.
+    // RGB spreads chroma differences over all channels, so the numbers sit below YUV PSNR.
+    const psnr = shownPsnr(output, reference);
+    assert.equal(psnr.frames, 90, "both renders decode to 90 frames");
     // An <OffthreadVideo> frame captured before it was shown would sit near 16 dB.
     assert.ok(
-      psnr.min > 35 && psnr.average > 40,
+      psnr.min > 30 && psnr.average > 35,
       `matches remotion render (avg ${psnr.average.toFixed(1)} dB, min ${psnr.min.toFixed(1)} dB; colour tags FrameVelo ${colorTags(output)}, remotion ${colorTags(reference)})`,
     );
     const samples = (file: string) => execFileSync("ffmpeg", ["-v", "error", "-i", file, "-vn", "-ac", "1", "-f", "f32le", "-"], { maxBuffer: 64 << 20 });
     assert.ok(samples(output).equals(samples(reference)), "the audio is Remotion's own mix, sample for sample");
   });
 
-  test("colours: FrameVelo encodes BT.709, as remotion render --color-space=bt709 does", async () => {
+  test("colours: FrameVelo and remotion render --color-space=bt709 show the colours drawn", async () => {
     const output = path.join(dir, "colors.mp4");
     const reference = path.join(dir, "colors.remotion.mp4");
     await render({ input: remotionFixture, output, composition: "Colors", frames: 3 });
     remotionRender("Colors", reference);
-    const ours = patches(output);
-    const theirs = patches(reference);
-    const bt709 = [[63, 102, 240], [173, 42, 26], [32, 240, 118], [126, 128, 128]];
-    const report = `FrameVelo ${JSON.stringify(ours)} (${colorTags(output)}); remotion render ${JSON.stringify(theirs)} (${colorTags(reference)})`;
-    assert.ok(ours.every((p, i) => p.every((v, c) => Math.abs(v - bt709[i]![c]!) <= 3)), `FrameVelo is BT.709: ${report}`);
-    assert.ok(theirs.every((p, i) => p.every((v, c) => Math.abs(v - ours[i]![c]!) <= 3)), `the same YUV as remotion render: ${report}`);
+    const drawn = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [128, 128, 128]];
+    const report = `FrameVelo shows ${JSON.stringify(shownPatches(output))}, YUV ${JSON.stringify(patches(output))} (${colorTags(output)}); remotion render shows ${JSON.stringify(shownPatches(reference))}, YUV ${JSON.stringify(patches(reference))} (${colorTags(reference)})`;
+    const close = (file: string) => shownPatches(file).every((p, i) => p.every((v, c) => Math.abs(v - drawn[i]![c]!) <= 6));
+    assert.ok(close(output), `FrameVelo shows the colours drawn: ${report}`);
+    assert.ok(close(reference), `remotion render shows the colours drawn: ${report}`);
   });
 
   test("with several compositions and none chosen, the error names them", async () => {
