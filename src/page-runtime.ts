@@ -49,7 +49,10 @@ export interface PageEncodeOptions {
   keyframeInterval: number;
   /** Sub-frames averaged into each output frame (motion blur). */
   subframes: number;
-  /** Skip the paint of a frame in which nothing visible can have changed (DOM capture). */
+  /**
+   * DOM capture: a sample uses the capture canvas as the last paint left it when nothing changed
+   * since. Off, every sample requests a paint of its own.
+   */
   reusePaints?: boolean;
   hardwareAcceleration: "prefer-hardware" | "no-preference" | "prefer-software";
   maxEncodeQueue: number;
@@ -64,10 +67,16 @@ export interface PageRenderStats {
   hardwareFallback: boolean;
   seekMs: number;
   paintMs: number;
+  /** Time sub-frames spent waiting for a paint they requested. */
+  paintWaitMs: number;
   encodeWaitMs: number;
   transferWaitMs: number;
-  /** Sub-frames whose paint was skipped because nothing changed since the previous one. */
+  /** Sub-frames in which nothing changed since the previous one: the canvas was encoded as it was. */
   reusedPaints: number;
+  /** Sub-frames whose changes Chrome had already painted, and the capture canvas drawn, during the seek. */
+  followedPaints: number;
+  /** Sub-frames that requested a paint and waited for it. */
+  requestedPaints: number;
   /** Encoded chunks the encoder returned (one per frame unless it dropped some). */
   chunks: number;
   /** Chunks with no payload (the encoder skipped an unchanged frame). */
@@ -197,6 +206,7 @@ export function pageInstallRuntime(): void {
   type Seek = (t: number) => unknown;
   type Timeline = { seek: (t: number, suppressEvents?: boolean) => unknown; duration?: () => number };
   type DrawElementContext = CanvasRenderingContext2D & { drawElementImage(element: Element, x: number, y: number): void };
+  type PaintableCanvas = HTMLCanvasElement & { onpaint: (() => void) | null; requestPaint(): void };
   type W = Window & {
     __fv?: unknown;
     __fvClock?: { now: () => number; setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout };
@@ -261,12 +271,21 @@ export function pageInstallRuntime(): void {
     accelerated: HTMLCanvasElement[];
     background: string;
     route: "dom" | "screenshot";
-    /** Mutations inside the captured element since the last paint. */
+    /** Mutations inside the captured element since the last draw. */
     dirty: boolean;
-    /** The next paint must not be skipped (route switch, first frame). */
+    /** The next sample must request a paint (route switch, cleared canvas, failed draw). */
     forcePaint: boolean;
-    /** Animation clock signature at the last paint. */
+    /** Animation clock signature at the last draw. */
     animationSignature: string;
+    /** An image was still loading at the last draw, so the canvas may not show it yet. */
+    loadingAtDraw: boolean;
+    /** Draws of the capture canvas so far, and how many there had been at the last sample. */
+    draws: number;
+    sampledDraws: number;
+    /** A sample waiting for the paint it requested. */
+    waiter: { resolve: () => void; reject: (error: unknown) => void } | null;
+    /** settle() is letting a rendering update pass undrawn. */
+    settling: boolean;
     reuseBlocker: string | null;
     /** Videos seeked to the composition time on every seek (plain pages, <video data-start>). */
     media: HTMLVideoElement[];
@@ -349,7 +368,18 @@ export function pageInstallRuntime(): void {
     warmups: Set<number>;
     /** The encoder's output colour space, once reported. */
     colorSpace?: EncodedColorSpace;
-    stats: { seekMs: number; paintMs: number; encodeWaitMs: number; transferWaitMs: number; reusedPaints: number; chunks: number; emptyChunks: number };
+    stats: {
+      seekMs: number;
+      paintMs: number;
+      paintWaitMs: number;
+      encodeWaitMs: number;
+      transferWaitMs: number;
+      reusedPaints: number;
+      followedPaints: number;
+      requestedPaints: number;
+      chunks: number;
+      emptyChunks: number;
+    };
   }
   let session: Session | null = null;
 
@@ -593,6 +623,11 @@ export function pageInstallRuntime(): void {
       dirty: true,
       forcePaint: true,
       animationSignature: "",
+      loadingAtDraw: false,
+      draws: 0,
+      sampledDraws: 0,
+      waiter: null,
+      settling: false,
       reuseBlocker: null,
       media: [],
     };
@@ -620,6 +655,7 @@ export function pageInstallRuntime(): void {
         st.dirty = true;
       }).observe(target, { subtree: true, attributes: true, childList: true, characterData: true });
     }
+    if (capture) followPaints(st);
     return {
       driver: found.driver,
       mode,
@@ -725,21 +761,74 @@ export function pageInstallRuntime(): void {
     return parts.join("|");
   }
 
-  /** Run one rendering update through the capture canvas's paint event, drawing nothing. */
+  /** Whether an image inside the captured element is still loading. */
+  const imagesLoading = (st: State) => Array.from(st.target.querySelectorAll("img")).some((img) => !img.complete);
+
+  /** Ask for a paint event on the capture canvas, even when nothing in the composition changed. */
+  function requestPaint(st: State): void {
+    // A paint-level change outside the captured element guarantees the event.
+    const sentinel = st.sentinel!;
+    sentinel.style.backgroundColor = sentinel.style.backgroundColor === "rgb(0, 0, 0)" ? "rgb(1, 1, 1)" : "rgb(0, 0, 0)";
+    (st.capture as PaintableCanvas).requestPaint();
+  }
+
+  /**
+   * The capture canvas follows the composition. Chrome fires its paint event in every rendering
+   * update that changed what it holds, and this handler draws the composition right there: a seek
+   * that waits for rendering updates (Remotion's) leaves its frame drawn, and the sample needs no
+   * paint request. paint() decides whether the last draw is still current.
+   */
+  function followPaints(st: State): void {
+    (st.capture as PaintableCanvas).onpaint = () => {
+      const s = session;
+      // Before begin() there is no output size, and on the screenshot route the canvas holds nothing.
+      if (!s || st.route !== "dom" || st.settling) return;
+      // Draw even when no sample will take it (paint reuse off or blocked): leaving Chrome's paint
+      // events undrawn made seeks slower, 57 s instead of 43 s for 900 frames of a Remotion project.
+      const waiter = st.waiter;
+      st.waiter = null;
+      try {
+        const p0 = clock.now();
+        drawDom(s, st);
+        s.stats.paintMs += clock.now() - p0;
+      } catch (error) {
+        // The next sample requests a paint, which reports the error.
+        st.forcePaint = true;
+        waiter?.reject(error);
+        return;
+      }
+      st.draws++;
+      // Mutations made by drawing itself (none expected) must not count for the next frame.
+      st.dirty = false;
+      st.forcePaint = false;
+      const tracked = s.o.reusePaints === true && !st.reuseBlocker;
+      st.animationSignature = tracked ? animationSignature(st) : "";
+      st.loadingAtDraw = tracked && imagesLoading(st);
+      waiter?.resolve();
+    };
+  }
+
+  /**
+   * Let one rendering update pass through the capture canvas's paint event, undrawn. An <img> whose
+   * source just changed (an injected video frame) reaches drawElementImage only after such an
+   * update, so the next sample requests a paint and a draw in this one would be wasted.
+   */
   function settleRendering(): Promise<void> {
     const st = state;
     if (!st || st.mode !== "dom" || st.route !== "dom" || !st.capture) return Promise.resolve();
-    const capture = st.capture as HTMLCanvasElement & { onpaint: (() => void) | null; requestPaint(): void };
-    st.forcePaint = true;
+    const capture = st.capture;
     return new Promise<void>((resolve) => {
-      const timer = clock.setTimeout(resolve, 2000);
-      capture.onpaint = () => {
+      const done = () => {
         clock.clearTimeout(timer);
+        capture.removeEventListener("paint", done);
+        st.settling = false;
+        st.forcePaint = true;
         resolve();
       };
-      const sentinel = st.sentinel!;
-      sentinel.style.backgroundColor = sentinel.style.backgroundColor === "rgb(0, 0, 0)" ? "rgb(1, 1, 1)" : "rgb(0, 0, 0)";
-      capture.requestPaint();
+      const timer = clock.setTimeout(done, 2000);
+      st.settling = true;
+      capture.addEventListener("paint", done);
+      requestPaint(st);
     });
   }
 
@@ -748,37 +837,38 @@ export function pageInstallRuntime(): void {
     await composite();
     // A shader transition changes the picture outside the observed element.
     if (shaderOverlay()) st.forcePaint = true;
-    if (s.o.reusePaints && !st.reuseBlocker && !st.forcePaint && !st.dirty) {
-      const signature = animationSignature(st);
-      // An image still loading will change the picture without another mutation.
-      const loading = Array.from(st.target.querySelectorAll("img")).some((img) => !img.complete);
-      if (!loading && signature === st.animationSignature) {
-        s.stats.reusedPaints++;
+    // The canvas shows the composition as it is unless something changed after its last draw: a
+    // mutation, an animation clock, or an image loading then or now, whose load changes the
+    // picture without a mutation.
+    if (s.o.reusePaints && !st.reuseBlocker && !st.forcePaint && !st.dirty && !st.loadingAtDraw) {
+      if (!imagesLoading(st) && animationSignature(st) === st.animationSignature) {
+        if (st.draws === st.sampledDraws) s.stats.reusedPaints++;
+        else s.stats.followedPaints++;
+        st.sampledDraws = st.draws;
         return;
       }
     }
-    const capture = st.capture as HTMLCanvasElement & { onpaint: (() => void) | null; requestPaint(): void };
+    const w0 = clock.now();
     await new Promise<void>((resolve, reject) => {
-      const timer = clock.setTimeout(() => reject(new Error(`No paint event within ${s.o.paintTimeoutMs} ms.`)), s.o.paintTimeoutMs);
-      capture.onpaint = () => {
-        clock.clearTimeout(timer);
-        try {
-          const p0 = clock.now();
-          drawDom(s, st);
-          s.stats.paintMs += clock.now() - p0;
-          // Mutations made by drawing itself (none expected) must not count for the next frame.
-          st.dirty = false;
-          st.forcePaint = false;
-          st.animationSignature = s.o.reusePaints && !st.reuseBlocker ? animationSignature(st) : "";
+      const timer = clock.setTimeout(() => {
+        st.waiter = null;
+        reject(new Error(`No paint event within ${s.o.paintTimeoutMs} ms.`));
+      }, s.o.paintTimeoutMs);
+      st.waiter = {
+        resolve: () => {
+          clock.clearTimeout(timer);
           resolve();
-        } catch (error) {
+        },
+        reject: (error) => {
+          clock.clearTimeout(timer);
           reject(error);
-        }
+        },
       };
-      const sentinel = st.sentinel!;
-      sentinel.style.backgroundColor = sentinel.style.backgroundColor === "rgb(0, 0, 0)" ? "rgb(1, 1, 1)" : "rgb(0, 0, 0)";
-      capture.requestPaint();
+      requestPaint(st);
     });
+    s.stats.paintWaitMs += clock.now() - w0;
+    s.stats.requestedPaints++;
+    st.sampledDraws = st.draws;
   }
 
   function flush(s: Session): Promise<void> {
@@ -818,6 +908,8 @@ export function pageInstallRuntime(): void {
       source = st.capture;
       source.width = o.width;
       source.height = o.height;
+      // Resizing cleared it.
+      st.forcePaint = true;
     } else if (st.mode === "dom") {
       // Screenshot-only DOM capture: frames always come from decoded screenshots.
       source = document.createElement("canvas");
@@ -845,7 +937,18 @@ export function pageInstallRuntime(): void {
       chain: Promise.resolve(),
       frames: 0,
       warmups: new Set<number>(),
-      stats: { seekMs: 0, paintMs: 0, encodeWaitMs: 0, transferWaitMs: 0, reusedPaints: 0, chunks: 0, emptyChunks: 0 },
+      stats: {
+        seekMs: 0,
+        paintMs: 0,
+        paintWaitMs: 0,
+        encodeWaitMs: 0,
+        transferWaitMs: 0,
+        reusedPaints: 0,
+        followedPaints: 0,
+        requestedPaints: 0,
+        chunks: 0,
+        emptyChunks: 0,
+      },
     } as unknown as Session;
 
     let fail: (error: unknown) => void = () => {};
@@ -1132,9 +1235,12 @@ export function pageInstallRuntime(): void {
       hardwareFallback: s.hardwareFallback,
       seekMs: Math.round(s.stats.seekMs),
       paintMs: Math.round(s.stats.paintMs),
+      paintWaitMs: Math.round(s.stats.paintWaitMs),
       encodeWaitMs: Math.round(s.stats.encodeWaitMs),
       transferWaitMs: Math.round(s.stats.transferWaitMs),
       reusedPaints: s.stats.reusedPaints,
+      followedPaints: s.stats.followedPaints,
+      requestedPaints: s.stats.requestedPaints,
       chunks: s.stats.chunks,
       emptyChunks: s.stats.emptyChunks,
       ...(state?.reuseBlocker && s.o.reusePaints ? { reuseDisabledReason: state.reuseBlocker } : {}),

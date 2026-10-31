@@ -216,6 +216,23 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     });
   });
 
+  test("paint reuse: the frames are the same without it, and the stats say what each frame needed", async () => {
+    // The page steps every 10 frames and holds still in between.
+    const input = path.join(fixtures, "paint-reuse.html");
+    const reused = path.join(dir, "reuse-on.mp4");
+    const requested = path.join(dir, "reuse-off.mp4");
+    const on = (await render({ ...logging, input, output: reused })).page;
+    const off = (await render({ ...logging, input, output: requested, reusePaints: false })).page;
+    const counts = (p: typeof on) => `reused ${p.reusedPaints}, followed ${p.followedPaints}, requested ${p.requestedPaints}`;
+    assert.ok(on.reusedPaints >= 40, `frames that change nothing reuse the canvas (${counts(on)})`);
+    assert.ok(on.requestedPaints + on.followedPaints >= 6, `every step is painted (${counts(on)})`);
+    assert.equal(off.reusedPaints + off.followedPaints, 0, `--no-paint-reuse requests every paint (${counts(off)})`);
+    // A frame left one step behind would sit near 20 dB.
+    const { stderr } = spawnSync("ffmpeg", ["-hide_banner", "-i", reused, "-i", requested, "-lavfi", "[0:v][1:v]psnr", "-f", "null", "-"], { encoding: "utf8" });
+    const min = /min:(\S+)/.exec(stderr)?.[1];
+    assert.ok(min === "inf" || Number(min) > 40, `the same frames with and without reuse (min PSNR ${min} dB)`);
+  });
+
   test("a page without a time driver fails clearly and leaves no partial file", async () => {
     const output = path.join(dir, "fail.mp4");
     await assert.rejects(
