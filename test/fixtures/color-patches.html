@@ -7,11 +7,11 @@
 </style>
 </head>
 <body>
-<!-- Four flat patches, for checking the encoder's RGB to YUV matrix. -->
+<!-- Flat patches: saturated red, green and blue show the encoder's RGB to YUV matrix, dark grey its range. -->
 <canvas id="patches" width="256" height="64"></canvas>
 <script>
   const g = document.getElementById("patches").getContext("2d");
-  ["rgb(255,0,0)", "rgb(0,255,0)", "rgb(0,0,255)", "rgb(128,128,128)"].forEach((color, i) => {
+  ["rgb(255,0,0)", "rgb(0,255,0)", "rgb(0,0,255)", "rgb(40,40,40)"].forEach((color, i) => {
     g.fillStyle = color;
     g.fillRect(i * 64, 0, 64, 64);
   });

@@ -196,20 +196,23 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
   });
 
   test("colours come out as drawn, decoded with the tags the file carries", async () => {
-    // Red, green, blue and mid-grey patches. Encoders differ in range (Chrome's software encoder on
-    // Windows writes full range): what must hold is what a player shows from the file's own tags.
+    // Saturated red, green and blue show the encoder's matrix; dark grey shows its range, which
+    // differs between encoders (Chrome's software encoder on Windows writes full range) and moves it
+    // by 10 levels or more when mistagged. What must hold is what a player shows from the file's tags.
     const output = path.join(dir, "colors.mp4");
     const result = await render({ ...logging, input: path.join(fixtures, "color-patches.html"), output, frames: 3 });
+    const encoder = result.page.colorSpace;
+    assert.ok(encoder, "the encoder reports the colour space of its output");
+    const probe = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "stream=color_range,color_space", "-of", "json", output], { encoding: "utf8" });
+    const tags = (JSON.parse(probe) as { streams: { color_range: string; color_space: string }[] }).streams[0]!;
+    const context = `tags ${tags.color_range}/${tags.color_space}, encoder ${JSON.stringify(encoder)}`;
+    assert.equal(tags.color_range, encoder.fullRange ? "pc" : "tv", `tagged with the range the encoder wrote (${context})`);
     const rgb = execFileSync("ffmpeg", ["-v", "error", "-i", output, "-frames:v", "1", "-vf", "scale=in_color_matrix=auto:in_range=auto,format=rgb24", "-f", "rawvideo", "-"]);
-    const tags = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "stream=color_space,color_range", "-of", "csv=p=0", output], { encoding: "utf8" }).trim();
-    const drawn = { red: [255, 0, 0], green: [0, 255, 0], blue: [0, 0, 255], grey: [128, 128, 128] };
+    const drawn = { red: [255, 0, 0], green: [0, 255, 0], blue: [0, 0, 255], "dark grey": [40, 40, 40] };
     Object.entries(drawn).forEach(([name, want], i) => {
       const at = (32 * 256 + i * 64 + 32) * 3;
       const got = [rgb[at]!, rgb[at + 1]!, rgb[at + 2]!];
-      assert.ok(
-        got.every((v, c) => Math.abs(v - want[c]!) <= 6),
-        `${name}: shown as ${got.join(",")}, drawn ${want.join(",")} (tags ${tags}; encoder ${JSON.stringify(result.page.colorSpace)})`,
-      );
+      assert.ok(got.every((v, c) => Math.abs(v - want[c]!) <= 6), `${name}: shown as ${got.join(",")}, drawn ${want.join(",")} (${context})`);
     });
   });
 

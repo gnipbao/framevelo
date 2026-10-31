@@ -182,7 +182,7 @@ describe("Remotion projects (integration)", { skip }, () => {
     const reference = path.join(dir, "colors.remotion.mp4");
     await render({ input: remotionFixture, output, composition: "Colors", frames: 3 });
     remotionRender("Colors", reference);
-    const drawn = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [128, 128, 128]];
+    const drawn = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [40, 40, 40]];
     const report = `FrameVelo shows ${JSON.stringify(shownPatches(output))}, YUV ${JSON.stringify(patches(output))} (${colorTags(output)}); remotion render shows ${JSON.stringify(shownPatches(reference))}, YUV ${JSON.stringify(patches(reference))} (${colorTags(reference)})`;
     const close = (file: string) => shownPatches(file).every((p, i) => p.every((v, c) => Math.abs(v - drawn[i]![c]!) <= 6));
     assert.ok(close(output), `FrameVelo shows the colours drawn: ${report}`);
