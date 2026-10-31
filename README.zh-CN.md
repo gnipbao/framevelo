@@ -143,7 +143,7 @@ args = ["mcp"]
 - **Canvas 页面**：`<canvas>` 本身就是画面。
 - **DOM 页面**：被采集的元素移进 `<canvas layoutsubtree>`，用 `drawElementImage` 绘制。画布后备尺寸等于输出尺寸，`--scale 2` 会把 1080p 布局按 4K 重新光栅化。
 - **自校验**：编码前，每个区间（按片段边界切分）的采样帧分别用两种方式绘制并与原生截图比对；低于 `--verify-threshold`（30 dB）的区间改用截图采集，仍走同一个编码器。
-- **静帧复用**：画面没有可见变化的帧复用上一帧绘制，开启与关闭的输出逐字节一致。
+- **绘制复用**：Chrome 每次为合成内容触发 paint 事件时，FrameVelo 都会把内容画到捕获画布上。因此只有在上次绘制之后又发生变化的帧才需要单独请求绘制，没有任何变化的帧按原样编码。使用 `--no-paint-reuse` 时，帧画面完全相同。
 - **多页面并行**：需要 Node 逐帧驱动的帧（HyperFrames 视频帧、截图区间）受往返延迟限制，较长的这类帧段会分给多个页面，各用自己的编码器，最后按顺序拼接再封装。
 - **输出**：WebCodecs 用硬件编码器编码；FFmpeg 只把码流和音轨封装进 MP4 并写入 BT.709 标记。先写临时文件，用 ffprobe 校验后再重命名，失败不留半成品。
 
@@ -181,7 +181,7 @@ framevelo mcp
 | `--no-hyperframes` | | 把 HyperFrames 项目当普通页面渲染 |
 | `--composition <id>` | 唯一的那个 | Remotion 项目：要渲染的合成 |
 | `--props <json\|file>` | 默认 props | Remotion 项目：输入 props，内联 JSON 或 `.json` 文件 |
-| `--no-paint-reuse` | | 每帧都重新绘制 |
+| `--no-paint-reuse` | | 每帧都请求一次绘制 |
 | `--no-video-proxy` | | 不生成视频代理，直接定位源文件 |
 | `--chrome <path>` | 先 headless shell，再 Chrome | 浏览器可执行文件 |
 | `--json`、`-q, --quiet` | | 以 JSON 输出结果；不显示进度 |

@@ -189,6 +189,20 @@ describe("Remotion projects (integration)", { skip }, () => {
     assert.ok(close(reference), `remotion render shows the colours drawn: ${report}`);
   });
 
+  test("a seek leaves its frame drawn: the same frames as requesting every paint", async () => {
+    // Remotion's seek waits for rendering updates, in whose paint events the capture canvas is drawn.
+    const followed = path.join(dir, "followed.mp4");
+    const requested = path.join(dir, "requested.mp4");
+    const on = (await render({ input: remotionFixture, output: followed, composition: "Scene", frames: 45 })).page;
+    const off = (await render({ input: remotionFixture, output: requested, composition: "Scene", frames: 45, reusePaints: false })).page;
+    const counts = (p: typeof on) => `reused ${p.reusedPaints}, followed ${p.followedPaints}, requested ${p.requestedPaints}`;
+    assert.ok(on.followedPaints > on.frames / 2, `frames drawn during the seek need no paint request (${counts(on)})`);
+    assert.equal(off.reusedPaints + off.followedPaints, 0, `--no-paint-reuse requests every paint (${counts(off)})`);
+    const psnr = shownPsnr(followed, requested);
+    assert.equal(psnr.frames, 45);
+    assert.ok(psnr.min > 40, `the same frames either way (avg ${psnr.average.toFixed(1)} dB, min ${psnr.min.toFixed(1)} dB)`);
+  });
+
   test("with several compositions and none chosen, the error names them", async () => {
     await assert.rejects(render({ input: remotionFixture, output: path.join(dir, "none.mp4"), frames: 5 }), /pick one with --composition: Scene, Card, Showcase, Colors/);
     await assert.rejects(render({ input: remotionFixture, output: path.join(dir, "bad.mp4"), composition: "Nope", frames: 5 }), /No composition "Nope"/);

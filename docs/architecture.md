@@ -54,16 +54,32 @@ official HyperFrames capture code:
 - The canvas backing store is the output size and its CSS size the layout size, so `--scale 2`
   re-rasterizes vector content at 4K instead of upscaling.
 - The snapshot never includes the captured element's own transform; it is applied by hand.
-- A sentinel child of the canvas changes every frame so a paint event fires even for static frames.
+- A sentinel child of the canvas changes with every paint request, so the paint event fires even when
+  nothing in the composition changed.
 - WebGL/WebGPU canvases present by texture swap and would freeze in the snapshot. They are tracked
   from `getContext` (with `preserveDrawingBuffer`), hidden from the DOM paint and drawn underneath.
 - The HyperFrames page-side shader compositor draws transitions into a fixed overlay above the page;
   the overlay is drawn on top and paint reuse is off while it shows.
 
-**Paint reuse.** A seek that mutated nothing inside the captured element (MutationObserver), changed no
-animation clock, and left no image loading cannot change the picture; the previous paint is reused.
-Pages with canvas, iframe, SMIL or self-seeked video content always repaint. Output with and without
-reuse is byte-identical.
+**Paint reuse.** The capture canvas follows the composition: Chrome fires the canvas's paint event in
+every rendering update that changed what it holds, and one handler, set up with the canvas, draws the
+composition there. A sample takes the canvas as it is unless something changed after that draw: a
+mutation inside the captured element (MutationObserver), an animation clock, an image loading then or
+now, a route switch. Then it requests a paint and waits for it, which costs another rendering update.
+
+- Seeks that wait for rendering updates themselves (Remotion's) leave their frame drawn. On a 1080×1920
+  Remotion project (an `<OffthreadVideo>` presenter over paper textures, filters and shadows), 900
+  frames took 32.6 s this way and 43.5 s requesting every paint. On the light test fixture a requested
+  paint costs about 0.5 ms, and the two are level.
+- A frame in which nothing changed is encoded from the canvas as it was.
+- The handler draws in every paint event, also when no sample will take the draw: leaving Chrome's
+  paint events undrawn made the seeks slower (57 s instead of 43.5 s for the 900 frames above). The
+  exception is the update that lets an injected `<img>` reach drawElementImage, after which the
+  sample requests its paint anyway: drawing there cost 2% on the HyperFrames example.
+- Pages with canvas, iframe, SMIL or self-seeked video content request a paint for every sample.
+- The stats count each sample as `reusedPaints` (nothing changed), `followedPaints` (Chrome had painted
+  the change) or `requestedPaints`, with the time spent waiting in `paintWaitMs`. `--no-paint-reuse`
+  requests every paint; the frames are the same.
 
 ## Encoding and muxing
 

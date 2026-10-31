@@ -42,7 +42,8 @@ Render options:
                           fall back per interval), dom (drawElementImage only), screenshot
                           (default: auto)
       --verify-threshold <dB>  Verification PSNR below which an interval uses screenshots (default: 30)
-      --no-paint-reuse    Repaint every frame, even when a seek changed nothing in the composition
+      --no-paint-reuse    Request a paint for every frame rather than take the canvas as the last
+                          paint left it (the same frames, more slowly)
       --no-video-proxy    Plain pages: seek <video data-start> sources as they are instead of cached
                           all-intra proxies (slow for long keyframe intervals)
       --workers <n>       Pages rendering Node-driven frames (HyperFrames video, screenshots) in

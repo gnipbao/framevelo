@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; background: #000; }
+  #root { position: relative; width: 320px; height: 180px; overflow: hidden; background: #1b2238; color: #fff; font: 600 28px/1 Helvetica, sans-serif; }
+  #box { position: absolute; left: 0; top: 30px; width: 60px; height: 60px; border-radius: 10px; background: #f5a623; }
+  #step { position: absolute; left: 20px; bottom: 20px; }
+</style>
+</head>
+<body>
+<!-- Holds still for 10 frames at a time, then steps: the frames between steps change nothing. -->
+<div id="root"><div id="box"></div><div id="step"></div></div>
+<script>
+  const box = document.getElementById("box");
+  const label = document.getElementById("step");
+  let shown = -1;
+  function seek(t) {
+    const step = Math.floor(t * 3 + 1e-6);
+    if (step === shown) return;
+    shown = step;
+    box.style.transform = `translateX(${20 + step * 45}px)`;
+    label.textContent = `step ${step}`;
+  }
+  window.__framevelo = { duration: 2, fps: 30, seek };
+  seek(0);
+</script>
+</body>
+</html>

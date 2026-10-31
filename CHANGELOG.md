@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Paint reuse counted frames it did not reuse. Each requested paint left its handler on the capture
+  canvas, which went on drawing the composition whenever Chrome painted it, and cleared the flag that
+  reuse is decided on: a 1080×1920 Remotion render reported 6398 of its 6399 frames as reused while
+  every frame changed. The frames were right, because the handler had drawn them, and that is now the
+  design: one handler, set up with the canvas, draws in every paint event, and a frame requests a
+  paint only for changes made after the last draw, or when an image was still loading at it. Following
+  Chrome's paints took 32.6 s for 900 frames of that project, against 43.5 s requesting every paint.
+- The stats say what each frame needed: `reusedPaints` (nothing changed), `followedPaints` (Chrome had
+  painted the change), `requestedPaints`, and `paintWaitMs` for the time spent waiting.
+- A draw that failed in a paint no frame had requested was lost; the next frame now requests a paint,
+  which reports the error. `--no-paint-reuse` requests every paint.
+
 ## 0.6.0
 
 ### Remotion projects
