@@ -101,6 +101,8 @@ jobs:
       - run: npm ci
       - name: Install chrome-headless-shell
         run: node src/cli.ts browser install
+      - name: Install the Remotion fixture
+        run: node scripts/remotion-fixture.ts
       - name: Doctor
         run: node src/cli.ts doctor || true
       - name: Integration tests

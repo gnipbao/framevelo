@@ -1,6 +1,8 @@
 // Turn a results file from bench/run.ts into docs/benchmarks.md and its charts (light and dark SVG).
 //
-//   node bench/report.ts [bench/results/<file>.json]   (default: the newest file)
+//   node bench/report.ts [bench/results/<file>.json...]   (default: every file in bench/results)
+//
+// Each suite comes from the newest file that has it; the report lists which run each suite is from.
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -41,12 +43,27 @@ interface Results {
   fixtures?: FixtureRow[];
   workers?: { fixture: string; rows: Array<Run & { workers: number; pages: number; renderS: number; psnrAvg?: number; psnrMin?: number }> };
   browser?: Array<Run & { browser: string }>;
+  remotion?: {
+    version: string;
+    rows: Array<Run & { case: string; label: string; renderer: string; frames: number; audio: boolean; mb: number; runs: Run[]; psnrAvg?: number; psnrMin?: number }>;
+  };
 }
 
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const resultsDir = path.join(repo, "bench", "results");
-const file = process.argv[2] ?? path.join(resultsDir, readdirSync(resultsDir).filter((f) => f.endsWith(".json")).sort().at(-1)!);
-const results = JSON.parse(readFileSync(file, "utf8")) as Results;
+const SUITES = ["gsap", "fixtures", "workers", "browser", "remotion"] as const;
+const files = process.argv.length > 2 ? process.argv.slice(2) : readdirSync(resultsDir).filter((f) => f.endsWith(".json")).sort().map((f) => path.join(resultsDir, f));
+const runsByDate = files.map((file) => ({ file, data: JSON.parse(readFileSync(file, "utf8")) as Results })).sort((a, b) => a.data.date.localeCompare(b.data.date));
+const newest = runsByDate.at(-1)!;
+/** The newest run that measured each suite. */
+const sourceOf = new Map(SUITES.flatMap((suite) => {
+  const run = runsByDate.findLast((r) => r.data[suite] !== undefined);
+  return run ? [[suite, run] as const] : [];
+}));
+const results: Results = { ...newest.data };
+for (const suite of SUITES) (results as unknown as Record<string, unknown>)[suite] = sourceOf.get(suite)?.data[suite];
+/** Repeats as the run that measured the charted suite used them. */
+const repeatsOf = (suite: (typeof SUITES)[number]) => sourceOf.get(suite)?.data.repeats ?? results.repeats;
 const assets = path.join(repo, "docs", "assets");
 
 // ---------- charts ----------
@@ -113,42 +130,54 @@ const METRICS = [
   { key: "peakMb", label: "Peak memory", unit: (v: number) => `${(v / 1024).toFixed(2)} GB` },
 ] as const;
 
-/** GSAP showcase: three panels (wall, CPU, memory), each with 1080p and 4K groups of three bars. */
-function gsapChart(theme: Theme, rows: GsapRow[]): string {
+type Renderer = { key: string; label: string; color: (t: Theme) => string };
+
+/** Three panels (wall, CPU, memory); per panel, groups of bars (one per renderer) with their values. */
+function groupedChart(
+  theme: Theme,
+  chart: {
+    title: string;
+    subtitle: string;
+    renderers: readonly Renderer[];
+    groups: Array<{ label: string; rows: Array<Run & { renderer: string }> }>;
+    labelWidth: number;
+    repeats: number;
+  },
+): string {
   const width = 960;
-  const resolutions = [...new Set(rows.map((r) => r.resolution))];
+  const { renderers, groups } = chart;
+  const rows = groups.flatMap((g) => g.rows);
   const thickness = 14;
   const gap = 2;
   const groupGap = 20;
   const top = 124;
-  const groupHeight = RENDERERS.length * (thickness + gap) - gap;
-  const height = top + resolutions.length * groupHeight + (resolutions.length - 1) * groupGap + 40;
-  const labelWidth = 58;
+  const groupHeight = renderers.length * (thickness + gap) - gap;
+  const height = top + groups.length * groupHeight + (groups.length - 1) * groupGap + 40;
   const panelGap = 28;
-  const panelWidth = (width - 48 - labelWidth - 2 * panelGap) / 3;
+  const panelWidth = (width - 48 - chart.labelWidth - 2 * panelGap) / 3;
   let body = "";
   // Legend: swatch + label, in renderer order.
   let lx = 24;
-  for (const r of RENDERERS) {
+  for (const r of renderers) {
     body += `<rect x="${lx}" y="70" width="10" height="10" rx="2" fill="${r.color(theme)}"/>`;
     body += text(lx + 16, 79, r.label, `font-size="12" fill="${theme.secondary}"`);
     lx += 16 + r.label.length * 6.6 + 22;
   }
-  resolutions.forEach((res, g) => {
+  groups.forEach((group, g) => {
     const y = top + g * (groupHeight + groupGap);
-    body += text(24, y + groupHeight / 2 + 4, res === "4k" ? "4K" : res, `font-size="13" font-weight="600" fill="${theme.ink}"`);
+    body += text(24, y + groupHeight / 2 + 4, group.label, `font-size="13" font-weight="600" fill="${theme.ink}"`);
   });
   METRICS.forEach((metric, p) => {
-    const x0 = 24 + labelWidth + p * (panelWidth + panelGap);
+    const x0 = 24 + chart.labelWidth + p * (panelWidth + panelGap);
     const max = Math.max(...rows.map((r) => r[metric.key]));
     const valueRoom = 62;
     const scale = (panelWidth - valueRoom) / max;
     body += text(x0, top - 12, metric.label, `font-size="12" font-weight="600" fill="${theme.secondary}"`);
-    const bottom = top + resolutions.length * groupHeight + (resolutions.length - 1) * groupGap;
+    const bottom = top + groups.length * groupHeight + (groups.length - 1) * groupGap;
     body += `<line x1="${x0}" y1="${top - 4}" x2="${x0}" y2="${bottom + 4}" stroke="${theme.axis}" stroke-width="1"/>`;
-    resolutions.forEach((res, g) => {
-      RENDERERS.forEach((renderer, i) => {
-        const row = rows.find((r) => r.resolution === res && r.renderer === renderer.key);
+    groups.forEach((group, g) => {
+      renderers.forEach((renderer, i) => {
+        const row = group.rows.find((r) => r.renderer === renderer.key);
         if (!row) return;
         const y = top + g * (groupHeight + groupGap) + i * (thickness + gap);
         const length = row[metric.key] * scale;
@@ -157,9 +186,44 @@ function gsapChart(theme: Theme, rows: GsapRow[]): string {
       });
     });
   });
-  body += text(24, height - 16, `Lower is better. Median of ${results.repeats} runs; whole process tree sampled every 200 ms.`, `font-size="11" fill="${theme.muted}"`);
-  const m = results.machine;
-  return frame(theme, width, height, "10-second GSAP composition, 30 fps", `${m.cpu}, ${m.memoryGb} GB, ${m.os} · HyperFrames ${results.hyperframes}`, body);
+  body += text(24, height - 16, `Lower is better. Median of ${chart.repeats} runs; whole process tree sampled every 200 ms.`, `font-size="11" fill="${theme.muted}"`);
+  return frame(theme, width, height, chart.title, chart.subtitle, body);
+}
+
+const machineLine = () => `${results.machine.cpu}, ${results.machine.memoryGb} GB, ${results.machine.os}`;
+
+/** GSAP showcase: 1080p and 4K groups of three bars. */
+function gsapChart(theme: Theme, rows: GsapRow[]): string {
+  const resolutions = [...new Set(rows.map((r) => r.resolution))];
+  return groupedChart(theme, {
+    title: "10-second GSAP composition, 30 fps",
+    subtitle: `${machineLine()} · HyperFrames ${results.hyperframes}`,
+    renderers: RENDERERS,
+    groups: resolutions.map((res) => ({ label: res === "4k" ? "4K" : res, rows: rows.filter((r) => r.resolution === res) })),
+    labelWidth: 58,
+    repeats: repeatsOf("gsap"),
+  });
+}
+
+const REMOTION_RENDERERS = [
+  { key: "remotion", label: "remotion render", color: (t: Theme) => t.official },
+  { key: "framevelo", label: "FrameVelo", color: (t: Theme) => t.framevelo },
+] as const;
+
+/** Remotion: per case, `remotion render` against FrameVelo. */
+function remotionChart(theme: Theme, remotion: NonNullable<Results["remotion"]>): string {
+  const cases = [...new Set(remotion.rows.map((r) => r.case))];
+  return groupedChart(theme, {
+    title: "Remotion projects",
+    subtitle: `${machineLine()} · Remotion ${remotion.version}`,
+    renderers: REMOTION_RENDERERS,
+    groups: cases.map((c) => {
+      const rows = remotion.rows.filter((r) => r.case === c);
+      return { label: rows[0]!.label, rows };
+    }),
+    labelWidth: 170,
+    repeats: repeatsOf("remotion"),
+  });
 }
 
 /** Regression fixtures: official ÷ FrameVelo per fixture for wall time, CPU and memory, with a 1× line. */
@@ -217,6 +281,7 @@ function fixturesChart(theme: Theme, rows: FixtureRow[]): string {
 for (const [mode, theme] of Object.entries(THEMES)) {
   if (results.gsap) writeFileSync(path.join(assets, `bench-gsap-${mode}.svg`), gsapChart(theme, results.gsap));
   if (results.fixtures) writeFileSync(path.join(assets, `bench-fixtures-${mode}.svg`), fixturesChart(theme, results.fixtures));
+  if (results.remotion) writeFileSync(path.join(assets, `bench-remotion-${mode}.svg`), remotionChart(theme, results.remotion));
 }
 
 // ---------- markdown ----------
@@ -229,7 +294,7 @@ const picture = (name: string, alt: string) =>
 const m = results.machine;
 let md = `# Benchmarks
 
-FrameVelo against the official \`hyperframes render\` ${results.hyperframes} on one machine. Generated by \`node bench/report.ts\` from [\`${path.relative(repo, file)}\`](../${path.relative(repo, file)}); rerun with \`node bench/run.ts\` (see [bench/README.md](../bench/README.md)).
+FrameVelo against the official \`hyperframes render\` ${results.hyperframes}${results.remotion ? ` and \`remotion render\` ${results.remotion.version}` : ""} on one machine. Generated by \`node bench/report.ts\` from the results in [\`bench/results\`](../bench/results); rerun with \`node bench/run.ts\` (see [bench/README.md](../bench/README.md)).
 
 | | |
 |---|---|
@@ -237,9 +302,17 @@ FrameVelo against the official \`hyperframes render\` ${results.hyperframes} on 
 | System | ${m.os}, Node ${m.node} |
 | Browser | ${m.chrome} |
 | FFmpeg | ${m.ffmpeg.replace(/^ffmpeg version /, "")} |
-| FrameVelo | ${results.framevelo.version} (${results.framevelo.commit}) |
-| Date | ${results.date.slice(0, 10)} |
-${results.loadAverage ? `| Load average | ${results.loadAverage.start} before, ${results.loadAverage.end} after (1 minute) |\n` : ""}
+
+| Suites | Run | FrameVelo | Load average (1 minute, before → after) |
+|---|---|---|---|
+${[...new Set(sourceOf.values())]
+  .map((run) => {
+    const suites = SUITES.filter((suite) => sourceOf.get(suite) === run).join(", ");
+    const load = run.data.loadAverage ? `${run.data.loadAverage.start} → ${run.data.loadAverage.end}` : "";
+    return `| ${suites} | [${run.data.date.slice(0, 10)}](../${path.relative(repo, run.file)}) | ${run.data.framevelo.version} (${run.data.framevelo.commit}) | ${load} |`;
+  })
+  .join("\n")}
+
 **Method.** Each render runs alone. Wall time, CPU time (user + system) and peak resident memory cover the whole process tree (Node, Chrome and its helpers, FFmpeg), sampled every 200 ms. Quality is per-frame PSNR of the FrameVelo output against the official output. The machine is a working desktop rather than a lab box (see the load average above), so expect a few percent of noise.
 `;
 
@@ -249,7 +322,7 @@ if (results.gsap) {
   md += `
 ## GSAP composition
 
-[\`bench/fixtures/gsap-showcase\`](../bench/fixtures/gsap-showcase): 10 seconds at 30 fps of 80 cards with rounded corners, gradients and blurred shadows, three large radial gradients and per-letter title animation, all driven by one paused GSAP timeline. Rendered at 1080p and at 4K (\`--resolution 4k\` for the official CLI, \`--scale 2\` for FrameVelo). Median of ${results.repeats} interleaved runs.
+[\`bench/fixtures/gsap-showcase\`](../bench/fixtures/gsap-showcase): 10 seconds at 30 fps of 80 cards with rounded corners, gradients and blurred shadows, three large radial gradients and per-letter title animation, all driven by one paused GSAP timeline. Rendered at 1080p and at 4K (\`--resolution 4k\` for the official CLI, \`--scale 2\` for FrameVelo). Median of ${repeatsOf("gsap")} interleaved runs.
 
 ${picture("bench-gsap", "Wall time, CPU time and peak memory of the 10-second GSAP composition at 1080p and 4K")}
 
@@ -318,7 +391,7 @@ if (results.browser) {
   md += `
 ## Browser
 
-FrameVelo on the GSAP composition at 1080p with each browser. Median of ${results.repeats} runs.
+FrameVelo on the GSAP composition at 1080p with each browser. Median of ${repeatsOf("browser")} runs.
 
 | Browser | Wall | CPU | Peak memory |
 |---|---:|---:|---:|
@@ -328,5 +401,34 @@ ${results.browser.map((r) => `| ${r.browser} | ${f1(r.wallS)} s | ${f1(r.cpuS)} 
 `;
 }
 
+if (results.remotion) {
+  const r = results.remotion;
+  const cases = [...new Set(r.rows.map((row) => row.case))];
+  const pair = (c: string) => ({ remotion: r.rows.find((row) => row.case === c && row.renderer === "remotion")!, framevelo: r.rows.find((row) => row.case === c && row.renderer === "framevelo")! });
+  md += `
+## Remotion
+
+\`remotion render\` ${r.version} against FrameVelo on the same projects: Remotion's own hello-world template (\`npx create-video --hello-world\`, the \`HelloWorld\` composition, 5 s) at 1080p and at 4K (\`--scale 2\` for both), and [\`test/fixtures/remotion\`](../test/fixtures/remotion) at 720p, 3 s with an \`<OffthreadVideo>\` and an \`<Audio>\` with a volume curve. Both bundle the project with Remotion's CLI and mix the audio with Remotion's mixer; FrameVelo captures with \`drawElementImage\` and encodes on the hardware encoder where \`remotion render\` takes JPEG screenshots in several tabs and encodes with x264. Median of ${repeatsOf("remotion")} interleaved runs.
+
+${picture("bench-remotion", "Wall time, CPU time and peak memory of remotion render and FrameVelo on Remotion projects")}
+
+| Project | Renderer | Wall | CPU | Peak memory | File | PSNR vs remotion render |
+|---|---|---:|---:|---:|---:|---:|
+${r.rows
+  .map(
+    (row) =>
+      `| ${row.label} | ${row.renderer === "framevelo" ? "**FrameVelo**" : "\`remotion render\`"} | ${f1(row.wallS)} s | ${f1(row.cpuS)} s | ${row.peakMb} MB | ${row.mb} MB | ${row.psnrAvg !== undefined ? `${row.psnrAvg} / ${row.psnrMin} dB` : "reference"} |`,
+  )
+  .join("\n")}
+
+${cases
+  .map((c) => {
+    const { remotion, framevelo } = pair(c);
+    return `- ${remotion.label}: ${(remotion.wallS / framevelo.wallS).toFixed(1)}× faster, ${(remotion.cpuS / framevelo.cpuS).toFixed(1)}× less CPU, ${Math.round((1 - framevelo.peakMb / remotion.peakMb) * 100)}% less peak memory.`;
+  })
+  .join("\n")}
+`;
+}
+
 writeFileSync(path.join(repo, "docs", "benchmarks.md"), md);
-process.stdout.write(`docs/benchmarks.md and charts from ${path.relative(repo, file)}\n`);
+process.stdout.write(`docs/benchmarks.md and charts from ${[...new Set(sourceOf.values())].map((run) => path.relative(repo, run.file)).join(", ")}\n`);

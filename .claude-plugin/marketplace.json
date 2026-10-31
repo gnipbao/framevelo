@@ -11,7 +11,7 @@
     {
       "name": "framevelo",
       "source": "./plugin",
-      "description": "Render HyperFrames projects and seekable HTML/Canvas pages to MP4 on the GPU and the hardware encoder: MCP tools plus a skill."
+      "description": "Render HyperFrames projects, Remotion projects and seekable HTML/Canvas pages to MP4 on the GPU and the hardware encoder: MCP tools plus a skill."
     }
   ]
 }

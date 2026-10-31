@@ -21,6 +21,7 @@ GPU or the hardware encoder; Node only moves compressed bytes and orchestrates.
 | `src/page-runtime.ts` | Code that runs in the page: time drivers, capture canvas, paint, encoder, routes, media sync |
 | `src/planner.ts` | Intervals, verification samples, routing, PSNR |
 | `src/hyperframes.ts` | Optional HyperFrames integration through `@hyperframes/producer` |
+| `src/remotion.ts` | Remotion projects through the project's own Remotion: bundle, server, page setup, composition, audio |
 | `src/media-proxy.ts` | All-intra proxies for videos on plain pages |
 | `src/ffmpeg.ts` | Mux arguments, FFmpeg process, ffprobe verification |
 | `src/chrome.ts` | Browser discovery (headless shell first), flags, launch, install |
@@ -34,8 +35,9 @@ The page must be a pure function of time. `pagePrepare` looks for, in order:
 
 1. `window.__framevelo = { seek(t), duration?, fps? }`
 2. `window.__hf` (the HyperFrames runtime's seek protocol), when the page is served by the HyperFrames file server
-3. `window.__seek(t)` with an optional `window.__duration`
-4. A paused GSAP timeline on `window.__timelines` (`main` or the first key)
+3. `remotion_setFrame` with the composition FrameVelo mounted, in a Remotion bundle
+4. `window.__seek(t)` with an optional `window.__duration`
+5. A paused GSAP timeline on `window.__timelines` (`main` or the first key)
 
 Seeks are either *rendering* seeks, which may fire timeline callbacks, or *quiet* seeks
 (`suppressEvents`) used for verification, sub-frame samples and repositioning. Before the first frame
@@ -78,7 +80,9 @@ count, size, audio present) and renamed.
 
 DOM captures are split into intervals at clip boundaries (at most 2 s). Before encoding, the first and
 middle frame of each interval are painted with `drawElementImage` and compared, at reduced size, with a
-native screenshot of the same moment. Intervals under the threshold (30 dB) are captured with
+native screenshot of the same moment. The screenshot is taken at the element's CSS size: a screenshot
+scaled below 1x is rasterized at that scale, and its edges differ from a downscaled full-size paint
+enough to fail sharp content for no real difference. Intervals under the threshold (30 dB) are captured with
 `Page.captureScreenshot`; those JPEG frames are decoded in the page and fed to the same encoder, so a
 mixed render is still one H.264 stream. Routes are decided once, before the first frame.
 
@@ -116,6 +120,33 @@ peer `@hyperframes/producer` is installed:
    FrameVelo does not run, and a hot mix came out several dB louder and clipping.
 
 Chrome starts while the project compiles.
+
+## Remotion projects
+
+A directory whose `package.json` depends on `remotion` (or an entry file inside one) renders through
+the project's own Remotion, loaded from the project, so that bundle, server and page protocol match:
+
+1. `remotion bundle` (the project's CLI) builds the bundle, so `remotion.config.ts` applies (Webpack
+   or Rspack overrides, public directory).
+2. `RenderInternals.prepareServer` serves the bundle together with the `<OffthreadVideo>` frame
+   server (the Rust compositor), as `remotion render` does.
+3. Each capture page gets the globals Remotion's render pages get before the bundle loads (input
+   props, proxy port, timeouts, `alert`/`confirm` traps), then the bundle is switched to evaluation
+   mode, `remotion_calculateComposition` resolves the composition (`calculateMetadata()`, props), the
+   viewport takes the composition's size, and the bundle is switched to render it.
+4. The time driver calls `remotion_setFrame(frame)` and waits until the frame is done. Remotion
+   releases its own handle on the next animation frame and expects React to have rendered the frame
+   by then; without vsync that frame can come first. `<OffthreadVideo>` also reports ready for a
+   moment between fetching a video frame and loading the `<Img>` that shows it. A frame counts as
+   done when the page is ready, every image has loaded and decoded, and that still holds when the
+   page is idle (`requestIdleCallback`). Polling on timers instead captured empty video boxes.
+5. The driver collects the media assets each rendered frame reports (`remotion_collectAssets`);
+   `stitchFramesToVideo` mixes them with Remotion's own mixer (volume curves, playback rates, trims,
+   inline audio) into an M4A, which keeps the AAC priming that a raw ADTS stream would lose, and the
+   track is stream-copied in. On the test fixture the audio is sample-identical to `remotion render`.
+
+Remotion renders whole frames, so sub-frame motion blur does not apply. The backdrop is black, as in
+Remotion's JPEG renders.
 
 ## Parallel pages
 

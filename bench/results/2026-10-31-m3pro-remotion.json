@@ -1,0 +1,261 @@
+{
+  "version": 1,
+  "date": "2026-10-31T05:54:38.222Z",
+  "framevelo": {
+    "version": "0.5.0",
+    "commit": "f65ddd1"
+  },
+  "hyperframes": "0.8.186",
+  "machine": {
+    "model": "Mac15,6",
+    "cpu": "Apple M3 Pro",
+    "cores": 11,
+    "memoryGb": 18,
+    "os": "macOS 27.0.1",
+    "node": "v22.23.2",
+    "chrome": "chrome-headless-shell 154.0.8037.57",
+    "ffmpeg": "ffmpeg version 7.0.2"
+  },
+  "repeats": 3,
+  "loadAverage": {
+    "start": 2.7,
+    "end": 8.7
+  },
+  "remotion": {
+    "version": "4.0.539",
+    "rows": [
+      {
+        "case": "hello-world",
+        "label": "Hello World, 1080p",
+        "renderer": "remotion",
+        "wallS": 3.02,
+        "cpuS": 11.6,
+        "peakMb": 2933,
+        "runs": [
+          {
+            "wallS": 3.54,
+            "cpuS": 13.1,
+            "peakMb": 2917
+          },
+          {
+            "wallS": 3.02,
+            "cpuS": 11.6,
+            "peakMb": 2933
+          },
+          {
+            "wallS": 3.01,
+            "cpuS": 11.8,
+            "peakMb": 2933
+          }
+        ],
+        "frames": 150,
+        "audio": false,
+        "mb": 0.6
+      },
+      {
+        "case": "hello-world",
+        "label": "Hello World, 1080p",
+        "renderer": "framevelo",
+        "wallS": 2.74,
+        "cpuS": 3.9,
+        "peakMb": 849,
+        "runs": [
+          {
+            "wallS": 2.79,
+            "cpuS": 3.9,
+            "peakMb": 839
+          },
+          {
+            "wallS": 2.6,
+            "cpuS": 3.5,
+            "peakMb": 815
+          },
+          {
+            "wallS": 2.74,
+            "cpuS": 3.9,
+            "peakMb": 849
+          }
+        ],
+        "frames": 150,
+        "audio": false,
+        "mb": 1.8,
+        "psnrAvg": 43.3,
+        "psnrMin": 43
+      },
+      {
+        "case": "hello-world-4k",
+        "label": "Hello World, 4K",
+        "renderer": "remotion",
+        "wallS": 6.1,
+        "cpuS": 29.6,
+        "peakMb": 5401,
+        "runs": [
+          {
+            "wallS": 6.1,
+            "cpuS": 29.6,
+            "peakMb": 5401
+          },
+          {
+            "wallS": 6.25,
+            "cpuS": 32.2,
+            "peakMb": 5307
+          },
+          {
+            "wallS": 5.78,
+            "cpuS": 30.7,
+            "peakMb": 5376
+          }
+        ],
+        "frames": 150,
+        "audio": false,
+        "mb": 1.3
+      },
+      {
+        "case": "hello-world-4k",
+        "label": "Hello World, 4K",
+        "renderer": "framevelo",
+        "wallS": 4.73,
+        "cpuS": 4.6,
+        "peakMb": 849,
+        "runs": [
+          {
+            "wallS": 4.72,
+            "cpuS": 4.5,
+            "peakMb": 850
+          },
+          {
+            "wallS": 4.73,
+            "cpuS": 4.6,
+            "peakMb": 849
+          },
+          {
+            "wallS": 4.75,
+            "cpuS": 4.5,
+            "peakMb": 845
+          }
+        ],
+        "frames": 150,
+        "audio": false,
+        "mb": 3.7,
+        "psnrAvg": 40.6,
+        "psnrMin": 35.3
+      },
+      {
+        "case": "fixture",
+        "label": "Video + audio, 720p",
+        "renderer": "remotion",
+        "wallS": 3.23,
+        "cpuS": 11.7,
+        "peakMb": 2750,
+        "runs": [
+          {
+            "wallS": 3.2,
+            "cpuS": 10.1,
+            "peakMb": 2762
+          },
+          {
+            "wallS": 3.23,
+            "cpuS": 11.7,
+            "peakMb": 2750
+          },
+          {
+            "wallS": 3.23,
+            "cpuS": 11.8,
+            "peakMb": 2743
+          }
+        ],
+        "frames": 90,
+        "audio": true,
+        "mb": 0.6
+      },
+      {
+        "case": "fixture",
+        "label": "Video + audio, 720p",
+        "renderer": "framevelo",
+        "wallS": 3.48,
+        "cpuS": 4.5,
+        "peakMb": 847,
+        "runs": [
+          {
+            "wallS": 3.52,
+            "cpuS": 4.7,
+            "peakMb": 843
+          },
+          {
+            "wallS": 3.48,
+            "cpuS": 4.5,
+            "peakMb": 847
+          },
+          {
+            "wallS": 3.46,
+            "cpuS": 4.5,
+            "peakMb": 845
+          }
+        ],
+        "frames": 90,
+        "audio": true,
+        "mb": 0.7,
+        "psnrAvg": 43.4,
+        "psnrMin": 42.2
+      },
+      {
+        "case": "showcase",
+        "label": "Showcase 20 s, 1080p",
+        "renderer": "remotion",
+        "wallS": 14.41,
+        "cpuS": 113.9,
+        "peakMb": 4184,
+        "runs": [
+          {
+            "wallS": 14.88,
+            "cpuS": 113.2,
+            "peakMb": 4198
+          },
+          {
+            "wallS": 14.41,
+            "cpuS": 113.9,
+            "peakMb": 4184
+          },
+          {
+            "wallS": 13.85,
+            "cpuS": 113.1,
+            "peakMb": 4195
+          }
+        ],
+        "frames": 600,
+        "audio": true,
+        "mb": 13
+      },
+      {
+        "case": "showcase",
+        "label": "Showcase 20 s, 1080p",
+        "renderer": "framevelo",
+        "wallS": 12.93,
+        "cpuS": 16.2,
+        "peakMb": 1313,
+        "runs": [
+          {
+            "wallS": 12.83,
+            "cpuS": 16,
+            "peakMb": 1259
+          },
+          {
+            "wallS": 12.95,
+            "cpuS": 16.5,
+            "peakMb": 1274
+          },
+          {
+            "wallS": 12.93,
+            "cpuS": 16.2,
+            "peakMb": 1313
+          }
+        ],
+        "frames": 600,
+        "audio": true,
+        "mb": 31.8,
+        "psnrAvg": 41.5,
+        "psnrMin": 40.7
+      }
+    ]
+  }
+}

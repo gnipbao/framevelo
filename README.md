@@ -12,7 +12,7 @@
 
 <p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a></p>
 
-**FrameVelo** is a rendering accelerator for code-driven videos. It renders [HyperFrames](https://github.com/heygen-com/hyperframes) projects and any HTML/CSS/GSAP or Canvas/WebGL page that is a pure function of time to MP4, using as little time, CPU and memory as the hardware allows.
+**FrameVelo** is a rendering accelerator for code-driven videos. It renders [HyperFrames](https://github.com/heygen-com/hyperframes) projects, [Remotion](https://www.remotion.dev) projects and any HTML/CSS/GSAP or Canvas/WebGL page that is a pure function of time to MP4, using as little time, CPU and memory as the hardware allows.
 
 Most code-video renderers take a screenshot of every frame, ship it to Node as base64, decode it again in FFmpeg, convert it to YUV on the CPU and encode it with x264. FrameVelo keeps the frame on the GPU:
 
@@ -26,6 +26,7 @@ seek(t) ─► drawElementImage (DOM) / canvas ─► VideoFrame ─► WebCodec
 - **3.8× faster at 4K, 2.0× at 1080p** than `hyperframes render` on a 10-second GSAP composition, with 19× less CPU time and 76% less peak memory at 4K.
 - **The same frames.** On the 24 official HyperFrames regression fixtures, 23 match the official render at 40 dB PSNR or more. In total they render 1.6× faster with 2.1× less CPU and 49% less peak memory.
 - **HyperFrames through the official pipeline.** Fonts, sub-compositions, clip windows, `<video>` frames, shader transitions and the audio mix come from `@hyperframes/producer`; FrameVelo replaces only capture and encoding.
+- **Remotion projects too.** On the same projects FrameVelo uses 2.6–7× less CPU and 69–84% less peak memory than `remotion render`, in about the same time (0.9–1.3×): Remotion spreads JPEG screenshots over many tabs and keeps the cores busy, FrameVelo leaves them free. Bundling, `<OffthreadVideo>` frames and the audio mix stay Remotion's own; the audio is sample-identical.
 - **Verified output.** Each interval is checked against a native screenshot before encoding and falls back to screenshots when it differs; output is verified with ffprobe and written atomically.
 - **Ready for agents.** An MCP server (`framevelo mcp`), a Claude Code plugin and a skill, and `--json` output for shell-only agents.
 
@@ -62,13 +63,28 @@ framevelo render examples/dom-cards -o dom-cards.mp4 --scale 2
 framevelo render examples/canvas-particles -o particles.mp4 --codec hevc --subframes 3
 ```
 
-**Requirements:** macOS or Windows, Node.js 22.18+, FFmpeg and FFprobe on `PATH`, Chrome 151+ (`chrome-headless-shell` preferred). The numbers above are measured on macOS on Apple silicon. Windows runs the same integration tests in CI: H.264 is encoded on the GPU where it has an encoder and by Chrome's software encoder otherwise, and HEVC needs a hardware encoder. Linux runs the unit tests only.
+**Requirements:** macOS or Windows, Node.js 22.18+, FFmpeg and FFprobe on `PATH`, Chrome 151+ (`chrome-headless-shell` preferred). The numbers above are measured on macOS on Apple silicon. Windows runs the same integration tests in CI: H.264 is encoded on the GPU where it has an encoder and by Chrome's software encoder otherwise, and HEVC needs a hardware encoder. Linux runs the unit tests only. Remotion projects need their own dependencies installed (`npm install`).
 
 ## What it renders
 
 ### HyperFrames projects
 
 A page with a `data-composition-id` root is compiled and served by the official HyperFrames pipeline, so it renders as `hyperframes render` would. Pass `--no-hyperframes` to render it as a plain page instead.
+
+### Remotion projects
+
+Point FrameVelo at a Remotion project, its directory or its entry file, and name the composition:
+
+```bash
+framevelo render my-remotion-project/ --composition MyComp -o out.mp4 --props '{"title":"Hello"}'
+```
+
+The project's own Remotion does the Remotion parts. Its CLI bundles the project, so `remotion.config.ts` applies; its renderer serves the bundle and the `<OffthreadVideo>` frames; its mixer makes the audio from what each frame plays. FrameVelo mounts the composition (with `calculateMetadata()` and the resolved props), drives it frame by frame, and replaces capture and encoding. The project's dependencies must be installed; Remotion 4 is supported (tested with 4.0.539). Remotion renders whole frames, so `--subframes` has no effect: blur inside the composition with `<CameraMotionBlur>`. Remotion's own license applies to the project as usual.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/bench-remotion-dark.svg">
+  <img alt="Wall time, CPU time and peak memory of remotion render and FrameVelo on Remotion projects" src="docs/assets/bench-remotion-light.svg" width="100%">
+</picture>
 
 ### Any seekable page
 
@@ -120,7 +136,7 @@ command = "framevelo"
 args = ["mcp"]
 ```
 
-`render` takes the CLI options as JSON (`input`, `output`, `frames`, `start`, `quality`, `scale`, ...), sends progress notifications, can be cancelled, runs renders one at a time and returns the output path, frame count, size, timings and warnings. **Shell-only agents:** `framevelo render <input> -o out.mp4 --json -q` prints the result as JSON, or `{"error": "..."}` with exit code 1.
+`render` takes the CLI options as JSON (`input`, `output`, `frames`, `start`, `quality`, `scale`, `composition` and `props` for Remotion, ...), sends progress notifications, can be cancelled, runs renders one at a time and returns the output path, frame count, size, timings and warnings. **Shell-only agents:** `framevelo render <input> -o out.mp4 --json -q` prints the result as JSON, or `{"error": "..."}` with exit code 1.
 
 ## How it works
 
@@ -163,6 +179,8 @@ framevelo mcp
 | `--mount <prefix>=<dir>` | | Serve another directory, e.g. `/vendor/=./vendor` |
 | `--workers <n>` | from the CPU count | Most pages for Node-driven frames; `1` turns parallel pages off |
 | `--no-hyperframes` | | Render a HyperFrames project as a plain page |
+| `--composition <id>` | the only one | Remotion projects: the composition to render |
+| `--props <json\|file>` | default props | Remotion projects: input props, inline JSON or a `.json` file |
 | `--no-paint-reuse` | | Repaint every frame |
 | `--no-video-proxy` | | Seek video sources as they are |
 | `--chrome <path>` | headless shell, then Chrome | Browser binary |
@@ -183,6 +201,7 @@ console.log(result.wallMs, result.stages, result.warnings);
 
 - `drawElementImage` is an Origin Trial API (through Chrome 160) that changed shape in Chrome 155. Verification guards against regressions; check a new Chrome with `node bench/parity.ts`.
 - Video-heavy HyperFrames projects gain less than motion graphics: every new video frame costs about one rendering update, which parallel pages overlap at the cost of more memory.
+- Remotion support follows Remotion 4's render-page protocol, which is internal to Remotion: a bundle that speaks another version is refused with a clear error rather than rendered wrong. Each `<OffthreadVideo>` frame still costs a fetch from Remotion's frame server.
 - The hardware encoder is shared with other apps; screen recorders and video calls slow encoding down. It also needs more bits than x264 for the same quality, so files are larger.
 
 ## Development

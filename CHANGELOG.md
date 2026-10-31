@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.6.0
+
+### Remotion projects
+
+- `framevelo render <remotion-project> --composition <id> [--props <json|file>]` renders a Remotion
+  project (its directory, or its entry file) through the project's own Remotion: its CLI bundles the
+  project (`remotion.config.ts` applies), its renderer serves the bundle and the `<OffthreadVideo>`
+  frames, and its mixer makes the audio. FrameVelo mounts the composition (`calculateMetadata()`,
+  resolved props), drives it with `remotion_setFrame`, and replaces capture and encoding. Remotion 4,
+  tested with 4.0.539; the MCP `render` tool takes `composition` and `props`.
+- A frame counts as done when the page is ready, its images have loaded and decoded, and that still
+  holds when the page is idle: Remotion releases a frame on the next animation frame and expects
+  React to be done by then, which without vsync it may not be, and `<OffthreadVideo>` reports ready
+  for a moment between fetching a frame and showing it. Both captured empty video boxes before.
+- The audio is Remotion's own mix of the media each frame reported, kept in M4A so that the AAC
+  priming survives: sample-identical to `remotion render` on the test fixture.
+- Against `remotion render` 4.0.539 on an M3 Pro (Remotion's hello-world template at 1080p and 4K, a
+  3 s video-and-audio scene, a 20 s 1080p showcase): 2.6–7× less CPU and 69–84% less peak memory in
+  0.9–1.3× the time, with 40.6–43.4 dB average PSNR against Remotion's output.
+- `bench/run.ts --suite remotion` measures `remotion render` against FrameVelo; `test/fixtures/remotion`
+  is a Remotion project (a scene with `<OffthreadVideo>` and `<Audio>`, a 20 s showcase) with its own
+  dependencies, prepared by `node scripts/remotion-fixture.ts` and rendered in CI.
+
+### Fixes
+
+- Verification screenshots are taken at the element's CSS size. A screenshot scaled below 1x is
+  rasterized at that scale, and on sharp content it failed verification against a full-size paint
+  for no real difference, sending intervals to the slower screenshot route.
+
 ## 0.5.0
 
 ### Windows
