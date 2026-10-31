@@ -213,6 +213,18 @@ function mergeStats(all: PageRenderStats[]): PageRenderStats {
 
 const SCREENSHOT_TIMEOUT_MS = 60_000;
 
+/**
+ * One screenshot at a time across pages. Chrome largely serializes screenshot work anyway (two pages
+ * gain about 6%), and on the macOS CI runner two pages capturing at once sometimes never got a
+ * screenshot back.
+ */
+let screenshotTurn: Promise<unknown> = Promise.resolve();
+function oneScreenshotAtATime<T>(work: () => Promise<T>): Promise<T> {
+  const run = screenshotTurn.then(work, work);
+  screenshotTurn = run.catch(() => {});
+  return run;
+}
+
 /** `work`, or a rejection with `message` after `ms`. */
 function withTimeout<T>(ms: number, message: string, work: Promise<T>): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -235,16 +247,31 @@ function pageDriver(page: Page, width: number) {
     // its edges differ from a downscaled full-size paint: verification would fail on sharp content.
     async screenshot(shotWidth: number | null = width): Promise<string> {
       await page.evaluate(() => (window as unknown as FvWindow).__fv.composite());
-      cdp ??= await page.createCDPSession();
       const rect = await page.evaluate(() => (window as unknown as FvWindow).__fv.targetRect());
-      // Protocol calls have no timeout (renders are long): a screenshot that never comes must fail.
-      const { data } = await withTimeout(SCREENSHOT_TIMEOUT_MS, "Chrome returned no screenshot within 60 s.", cdp.send("Page.captureScreenshot", {
-        format: "jpeg",
-        quality: 95,
-        optimizeForSpeed: true,
-        clip: { ...rect, scale: shotWidth === null ? 1 : shotWidth / rect.width },
-      }));
-      return data;
+      const shoot = async () => {
+        cdp ??= await page.createCDPSession();
+        // Protocol calls have no timeout (renders are long): a screenshot that never comes must fail.
+        const { data } = await withTimeout(
+          SCREENSHOT_TIMEOUT_MS,
+          "Chrome returned no screenshot within 60 s.",
+          cdp.send("Page.captureScreenshot", {
+            format: "jpeg",
+            quality: 95,
+            optimizeForSpeed: true,
+            clip: { ...rect, scale: shotWidth === null ? 1 : shotWidth / rect.width },
+          }),
+        );
+        return data;
+      };
+      try {
+        return await oneScreenshotAtATime(shoot);
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.startsWith("Chrome returned no screenshot")) throw error;
+        // Once more, on a fresh protocol session.
+        await cdp?.detach().catch(() => {});
+        cdp = undefined;
+        return oneScreenshotAtATime(shoot);
+      }
     },
     detach: () => cdp?.detach().catch(() => {}),
   };
@@ -330,12 +357,13 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
     };
     const begin = (page: Page) => page.evaluate((o) => (window as unknown as FvWindow).__fv.begin(o), encodeOptions);
 
-    // Workers pay off for frames driven from Node, which are latency-bound. Open them while the
-    // main page verifies when the frames are known to be Node-driven up front (video injection,
-    // forced screenshots); they then take a share of the verification too.
+    // Workers pay off for frames driven from Node through the page (video injection): each waits
+    // on round trips, not on the GPU. Screenshot frames do not count: Chrome serializes screenshot
+    // work, so a second page gained about 6% there. Workers open while the main page verifies when
+    // the frames are known up front, and take a share of the verification too.
     // A page costs about a second to open and a few hundred MB: one per FRAMES_PER_WORKER frames.
     const nodeDriven = (routeOf: (frame: number) => CaptureRoute) =>
-      planSegments(job, routeOf).reduce((n, segment) => n + (segment.hooked ? segment.count : 0), 0);
+      planSegments(job, routeOf).reduce((n, segment) => n + (segment.hooked && segment.route === "dom" ? segment.count : 0), 0);
     const laneCount = (driven: number) =>
       job.openWorker ? Math.max(1, Math.min(job.workers ?? 1, Math.floor(driven / FRAMES_PER_WORKER))) : 1;
     const openLanes = (count: number) => {

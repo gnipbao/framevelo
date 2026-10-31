@@ -23,3 +23,4 @@ renders/
 
 # Remotion test fixture: generated media and its own dependencies
 test/fixtures/remotion/public/
+test/fixtures/hf-long-video/clip.mp4

@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
+
 import { framePsnr } from "../bench/measure.ts";
 import { prepareRemotionFixture, remotionFixture, remotionFixtureInstalled } from "../scripts/remotion-fixture.ts";
 import { findChrome } from "../src/chrome.ts";
@@ -77,16 +78,55 @@ test("the mixed audio is copied in beside the video, never re-encoded or cut", (
   assert.equal(args.at(-1), "out.mp4");
 });
 
+/** Colour tags of a file's video stream, for failure messages. */
+const colorTags = (file: string) =>
+  execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "stream=color_space,color_primaries,color_transfer,color_range", "-of", "csv=p=0", file], { encoding: "utf8" }).trim();
+
+/** YUV of the four patches of the Colors composition (first frame). */
+function patches(file: string): number[][] {
+  const yuv = execFileSync("ffmpeg", ["-v", "error", "-i", file, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"]);
+  const [w, h] = [256, 64];
+  return [0, 1, 2, 3].map((i) => {
+    const x = i * 64 + 32;
+    return [yuv[32 * w + x]!, yuv[w * h + 16 * (w / 2) + x / 2]!, yuv[w * h + (w * h) / 4 + 16 * (w / 2) + x / 2]!];
+  });
+}
+
 const integration = process.env.FRAMEVELO_INTEGRATION === "1";
 const skip = !integration ? "set FRAMEVELO_INTEGRATION=1" : !remotionFixtureInstalled() ? "the Remotion fixture is not installed: node scripts/remotion-fixture.ts" : false;
 
 describe("Remotion projects (integration)", { skip }, () => {
   let dir: string;
+  // FRAMEVELO_TEST_OUT keeps the renders (CI uploads them when a job fails).
+  const keep = process.env.FRAMEVELO_TEST_OUT;
   before(() => {
-    dir = mkdtempSync(path.join(os.tmpdir(), "framevelo-remotion-"));
+    dir = keep ? path.join(keep, "remotion") : mkdtempSync(path.join(os.tmpdir(), "framevelo-remotion-"));
+    mkdirSync(dir, { recursive: true });
     prepareRemotionFixture({ install: false });
   });
-  after(() => rmSync(dir, { recursive: true, force: true }));
+  after(() => {
+    if (!keep) rmSync(dir, { recursive: true, force: true });
+  });
+  /**
+   * `remotion render` on the same Chrome as FrameVelo, so that only capture and encoding differ, and
+   * in BT.709 like FrameVelo: Remotion 4 converts with BT.601 by default.
+   */
+  const remotionRender = (composition: string, output: string) => {
+    const chrome = findChrome();
+    execFileSync(
+      process.execPath,
+      [
+        path.join(remotionFixture, "node_modules", "@remotion", "cli", "remotion-cli.js"),
+        "render",
+        composition,
+        output,
+        "--log=error",
+        "--color-space=bt709",
+        ...(chrome ? ["--browser-executable", chrome] : []),
+      ],
+      { cwd: remotionFixture, stdio: "inherit" },
+    );
+  };
 
   test("a composition renders with its audio, matching remotion render", async () => {
     const output = path.join(dir, "scene.mp4");
@@ -98,24 +138,34 @@ describe("Remotion projects (integration)", { skip }, () => {
     assert.deepEqual([probe.width, probe.height], [1280, 720]);
     assert.equal(probe.audioCodec, "aac");
 
-    // remotion render on the same Chrome, so that only capture and encoding differ.
     const reference = path.join(dir, "scene.remotion.mp4");
-    const chrome = findChrome();
-    execFileSync(
-      process.execPath,
-      [path.join(remotionFixture, "node_modules", "@remotion", "cli", "remotion-cli.js"), "render", "Scene", reference, "--log=error", ...(chrome ? ["--browser-executable", chrome] : [])],
-      { cwd: remotionFixture, stdio: "inherit" },
-    );
+    remotionRender("Scene", reference);
     const psnr = framePsnr(output, reference);
     assert.ok(psnr && psnr.frames === 90, "both renders decode to 90 frames");
     // An <OffthreadVideo> frame captured before it was shown would sit near 16 dB.
-    assert.ok(psnr.min > 35 && psnr.average > 40, `matches remotion render (avg ${psnr.average.toFixed(1)} dB, min ${psnr.min.toFixed(1)} dB)`);
+    assert.ok(
+      psnr.min > 35 && psnr.average > 40,
+      `matches remotion render (avg ${psnr.average.toFixed(1)} dB, min ${psnr.min.toFixed(1)} dB; colour tags FrameVelo ${colorTags(output)}, remotion ${colorTags(reference)})`,
+    );
     const samples = (file: string) => execFileSync("ffmpeg", ["-v", "error", "-i", file, "-vn", "-ac", "1", "-f", "f32le", "-"], { maxBuffer: 64 << 20 });
     assert.ok(samples(output).equals(samples(reference)), "the audio is Remotion's own mix, sample for sample");
   });
 
+  test("colours: FrameVelo encodes BT.709, as remotion render --color-space=bt709 does", async () => {
+    const output = path.join(dir, "colors.mp4");
+    const reference = path.join(dir, "colors.remotion.mp4");
+    await render({ input: remotionFixture, output, composition: "Colors", frames: 3 });
+    remotionRender("Colors", reference);
+    const ours = patches(output);
+    const theirs = patches(reference);
+    const bt709 = [[63, 102, 240], [173, 42, 26], [32, 240, 118], [126, 128, 128]];
+    const report = `FrameVelo ${JSON.stringify(ours)} (${colorTags(output)}); remotion render ${JSON.stringify(theirs)} (${colorTags(reference)})`;
+    assert.ok(ours.every((p, i) => p.every((v, c) => Math.abs(v - bt709[i]![c]!) <= 3)), `FrameVelo is BT.709: ${report}`);
+    assert.ok(theirs.every((p, i) => p.every((v, c) => Math.abs(v - ours[i]![c]!) <= 3)), `the same YUV as remotion render: ${report}`);
+  });
+
   test("with several compositions and none chosen, the error names them", async () => {
-    await assert.rejects(render({ input: remotionFixture, output: path.join(dir, "none.mp4"), frames: 5 }), /pick one with --composition: Scene, Card, Showcase/);
+    await assert.rejects(render({ input: remotionFixture, output: path.join(dir, "none.mp4"), frames: 5 }), /pick one with --composition: Scene, Card, Showcase, Colors/);
     await assert.rejects(render({ input: remotionFixture, output: path.join(dir, "bad.mp4"), composition: "Nope", frames: 5 }), /No composition "Nope"/);
   });
 

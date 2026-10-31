@@ -106,4 +106,14 @@ jobs:
       - name: Doctor
         run: node src/cli.ts doctor || true
       - name: Integration tests
+        env:
+          FRAMEVELO_TEST_OUT: ${{ runner.temp }}/test-out
         run: npm run test:integration
+      - name: Keep the renders of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renders-${{ matrix.os }}
+          path: ${{ runner.temp }}/test-out
+          if-no-files-found: ignore
+          retention-days: 7

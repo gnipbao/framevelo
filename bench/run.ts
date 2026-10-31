@@ -275,7 +275,8 @@ if (suites.has("remotion")) {
     { name: "showcase", label: "Showcase 20 s, 1080p", dir: fixture, composition: "Showcase", extra: [] as string[] },
   ];
   const renderers = [
-    { renderer: "remotion", run: (c: (typeof cases)[number], o: string) => measure(process.execPath, [remotionCli(c.dir), "render", c.composition, o, "--log=error", ...c.extra], { cwd: c.dir }) },
+    // BT.709 like FrameVelo (Remotion 4 defaults to BT.601), so that the PSNR compares like with like.
+    { renderer: "remotion", run: (c: (typeof cases)[number], o: string) => measure(process.execPath, [remotionCli(c.dir), "render", c.composition, o, "--log=error", "--color-space=bt709", ...c.extra], { cwd: c.dir }) },
     { renderer: "framevelo", run: (c: (typeof cases)[number], o: string) => framevelo(c.dir, o, ["--composition", c.composition, ...c.extra]) },
   ];
   // Remotion fetches its browser on first use: keep that out of the measured runs.

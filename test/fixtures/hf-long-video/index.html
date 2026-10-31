@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=320, height=180" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      body { margin: 0; background: #000; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; }
+      #clip { position: absolute; left: 0; top: 0; width: 320px; height: 180px; object-fit: cover; }
+    </style>
+  </head>
+  <body>
+    <!-- 15 s of video, 450 injected frames: enough for two parallel pages. The test generates clip.mp4. -->
+    <div id="root" data-composition-id="main" data-start="0" data-width="320" data-height="180" data-duration="15">
+      <video id="clip" src="clip.mp4" muted playsinline data-start="0" data-duration="15" data-track-index="0"></video>
+    </div>
+    <script>
+      window.__timelines["main"] = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>
