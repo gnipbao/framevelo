@@ -143,6 +143,16 @@ export function startMux(args: string[], ffmpegPath = "ffmpeg"): MuxProcess {
   };
 }
 
+/** Arguments that copy `video`'s video stream and `audio`'s audio stream into `output` (MP4). */
+export function remuxWithAudioArgs(video: string, audio: string, output: string): string[] {
+  return ["-hide_banner", "-loglevel", "error", "-y", "-i", video, "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", "-f", "mp4", output];
+}
+
+/** Add an audio track to a finished video without re-encoding either. */
+export async function remuxWithAudio(video: string, audio: string, output: string, ffmpegPath = "ffmpeg"): Promise<void> {
+  await execFileAsync(ffmpegPath, remuxWithAudioArgs(video, audio, output), { maxBuffer: 8 << 20 });
+}
+
 export interface VideoProbe {
   codec: string;
   width: number;

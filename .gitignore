@@ -20,3 +20,6 @@ renders/
 
 # example media is part of the repo
 !examples/**/assets/*.mp4
+
+# Remotion test fixture: generated media and its own dependencies
+test/fixtures/remotion/public/

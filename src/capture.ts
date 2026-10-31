@@ -33,7 +33,14 @@ export async function openCapturePage(
   browser: Browser,
   url: string,
   viewport: { width: number; height: number },
-  options: { seedRandom?: boolean; ownWindow?: boolean } = {},
+  options: {
+    seedRandom?: boolean;
+    ownWindow?: boolean;
+    /** Runs before navigation, e.g. to add scripts that must run before the page's own. */
+    beforeLoad?: (page: Page) => Promise<void>;
+    /** Runs once the page and the FrameVelo runtime are loaded, before preparation. */
+    afterLoad?: (page: Page) => Promise<void>;
+  } = {},
 ): Promise<CapturePage> {
   // Full Chrome keeps its tabs in one window and paints only the front one: a capture page that is
   // not in front would never paint. Each page gets a window of its own there.
@@ -42,8 +49,10 @@ export async function openCapturePage(
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error instanceof Error ? error.message : String(error)));
   await page.evaluateOnNewDocument(pageBootstrap, { seedRandom: options.seedRandom ?? false });
+  await options.beforeLoad?.(page);
   await page.goto(url, { waitUntil: "load" });
   await page.evaluate(pageInstallRuntime);
+  await options.afterLoad?.(page);
   return { page, errors };
 }
 
@@ -107,6 +116,8 @@ export interface CaptureJob {
   openWorker?: () => Promise<CaptureWorker>;
   /** Called once every page the render uses is open, so pages opened ahead of time can be closed. */
   pagesReady?: () => void;
+  /** Called with each page once it has rendered its range, before it closes. */
+  afterRange?: (page: Page) => Promise<void>;
   paintTimeoutMs?: number;
   ffmpegPath?: string;
   ffprobePath?: string;
@@ -219,9 +230,10 @@ function pageDriver(page: Page, width: number) {
     seek: (t: number, quiet = false) => page.evaluate((time, q) => (window as unknown as FvWindow).__fv.seek(time, q), t, quiet),
     setRoute: (route: CaptureRoute) => page.evaluate((r) => (window as unknown as FvWindow).__fv.setRoute(r), route),
     settle: () => page.evaluate(() => (window as unknown as FvWindow).__fv.settle()),
-    // `shotWidth` is the pixel width of the shot: the output width for frames, less for
-    // verification, which compares at reduced size anyway.
-    async screenshot(shotWidth = width): Promise<string> {
+    // `shotWidth` is the pixel width of the shot: the output width for frames, the element's own CSS
+    // width (null) for verification. A shot scaled below 1x is rasterized at that lower scale, and
+    // its edges differ from a downscaled full-size paint: verification would fail on sharp content.
+    async screenshot(shotWidth: number | null = width): Promise<string> {
       await page.evaluate(() => (window as unknown as FvWindow).__fv.composite());
       cdp ??= await page.createCDPSession();
       const rect = await page.evaluate(() => (window as unknown as FvWindow).__fv.targetRect());
@@ -230,7 +242,7 @@ function pageDriver(page: Page, width: number) {
         format: "jpeg",
         quality: 95,
         optimizeForSpeed: true,
-        clip: { ...rect, scale: shotWidth / rect.width },
+        clip: { ...rect, scale: shotWidth === null ? 1 : shotWidth / rect.width },
       }));
       return data;
     },
@@ -411,7 +423,9 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
         if (range.start > job.startFrame) await lane.driver.seek((range.start - 1) / job.fps);
         const result = await renderRange(job, lane, range, routeOf, loop);
         screenshotFrames += result.screenshotFrames;
-        return lane.driver.page.evaluate(() => (window as unknown as FvWindow).__fv.end());
+        const stats = await lane.driver.page.evaluate(() => (window as unknown as FvWindow).__fv.end());
+        await job.afterRange?.(lane.driver.page);
+        return stats;
       }),
     );
     const pageStats = mergeStats(stats);
@@ -515,7 +529,7 @@ async function planRoutes(
       // Moving the composition out of the capture canvas restarts CSS animations: seek again.
       await driver.setRoute("screenshot");
       await quietSeekAndHook(t);
-      const shot = await driver.screenshot(Math.min(640, job.width));
+      const shot = await driver.screenshot(null);
       const psnr = await page.evaluate((b64) => (window as unknown as FvWindow).__fv.compareScreenshot(b64), shot);
       psnrByFrame.set(frame, psnr);
       if (process.env.FRAMEVELO_VERIFY_DUMP) {

@@ -3,7 +3,7 @@
 // erasable TypeScript syntax.
 
 export type CaptureMode = "auto" | "canvas" | "dom";
-export type TimeDriver = "framevelo" | "hyperframes" | "seek" | "gsap";
+export type TimeDriver = "framevelo" | "hyperframes" | "remotion" | "seek" | "gsap";
 
 export interface PagePrepareOptions {
   mode: CaptureMode;
@@ -11,6 +11,8 @@ export interface PagePrepareOptions {
   readyTimeoutMs: number;
   /** The page is served with the HyperFrames runtime; wait for its `window.__hf` seek protocol. */
   expectHyperFrames?: boolean;
+  /** The page is a Remotion bundle in composition mode; drive it through `remotion_setFrame`. */
+  expectRemotion?: boolean;
 }
 
 export interface PagePrepareResult {
@@ -123,6 +125,8 @@ export interface FrameVeloPageApi {
   compareScreenshot(base64: string): Promise<number>;
   /** PNG data URL of the last drawElementImage paint (debugging verification). */
   captureDataUrl(): string;
+  /** Remotion compositions: the audio and video assets collected for each rendered frame. */
+  remotionAssets(): Record<number, unknown[]>;
   /**
    * Run a pending HyperFrames page-side shader composite (after video frames are injected, before
    * a screenshot): clone the scenes, paint the clones, run the shader into the overlay canvas.
@@ -188,6 +192,15 @@ export function pageInstallRuntime(): void {
     __fvClock?: { now: () => number; setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout };
     __fvAccelCanvases?: HTMLCanvasElement[];
     __framevelo?: { seek?: Seek; duration?: number; fps?: number; audio?: string };
+    /** Set by Node for a Remotion composition: which one, its timing, and whether to collect audio. */
+    __fvRemotion?: { id: string; fps: number; durationInFrames: number; collectAssets: boolean };
+    /** Audio and video assets Remotion reported for each rendered frame. */
+    __fvRemotionAssets?: Record<number, unknown[]>;
+    remotion_setFrame?: (frame: number, composition: string, attempt: number) => void;
+    remotion_renderReady?: boolean;
+    remotion_cancelledError?: string;
+    remotion_collectAssets?: () => Array<{ type: string }>;
+    remotion_delayRenderTimeouts?: Record<string, { label: string | null }>;
     __hf?: { seek?: (t: number) => unknown; duration?: number; buildReady?: Record<string, unknown> };
     __hfWaitForSeekCompletion?: () => Promise<void>;
     __hf_page_composite_pending?: boolean;
@@ -362,6 +375,56 @@ export function pageInstallRuntime(): void {
           duration: Number(hf.duration),
         };
       }
+      const remotion = w.__fvRemotion;
+      if (remotion && typeof w.remotion_setFrame === "function") {
+        const setFrame = w.remotion_setFrame;
+        const rendered = async (frame: number) => {
+          // remotion_setFrame holds a delayRender() handle until React has applied the frame. Poll
+          // on animation frames, as Remotion's renderer does: between two React passes the page can
+          // report ready for a moment, e.g. after <OffthreadVideo> fetched a frame and before the
+          // <Img> showing it has loaded. An <img> still loading means the frame is not done either.
+          const deadline = clock.now() + 60_000;
+          const done = () => w.remotion_renderReady === true && Array.from(document.images).every((img) => img.complete);
+          for (;;) {
+            while (!done()) {
+              if (w.remotion_cancelledError !== undefined) {
+                throw new Error(`The Remotion composition failed at frame ${frame}: ${String(w.remotion_cancelledError).split("\n")[0]}`);
+              }
+              if (clock.now() > deadline) {
+                const open = Object.values(w.remotion_delayRenderTimeouts ?? {}).map((h) => h.label ?? "(no label)");
+                throw new Error(`Remotion did not finish frame ${frame} within 60 s; open delayRender() handles: ${open.join(", ") || "none"}`);
+              }
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            }
+            // remotion_setFrame releases its own handle on the next animation frame, expecting React
+            // to have rendered the frame by then. Without vsync (as FrameVelo runs Chrome) that frame
+            // can come first: the page reports ready while React still has the frame queued. Ready
+            // counts once it still holds when the page is idle.
+            await new Promise<void>((resolve) => requestIdleCallback(() => resolve(), { timeout: 200 }));
+            if (done()) break;
+          }
+          await document.fonts.ready;
+          // Chrome decodes images lazily: a screenshot waits for the decode, drawElementImage draws an
+          // undecoded image as nothing. decode() resolves at once for an image already decoded.
+          await Promise.all(Array.from(document.images, (img) => (img.naturalWidth > 0 ? img.decode().catch(() => {}) : undefined)));
+        };
+        return {
+          driver: "remotion",
+          seek: async (t, quiet) => {
+            // Remotion renders whole frames: a time between two frames shows the one it falls in.
+            const frame = Math.min(remotion.durationInFrames - 1, Math.max(0, Math.round(t * remotion.fps)));
+            setFrame.call(w, frame, remotion.id, 1);
+            await rendered(frame);
+            if (!quiet && remotion.collectAssets && w.remotion_collectAssets) {
+              const media = w.remotion_collectAssets().filter((a) => a.type === "audio" || a.type === "video" || a.type === "inline-audio");
+              (w.__fvRemotionAssets ??= {})[frame] = media;
+            }
+          },
+          duration: remotion.durationInFrames / remotion.fps,
+          fps: remotion.fps,
+        };
+      }
+      if (options.expectRemotion) return null;
       if (options.expectHyperFrames) return null;
       if (typeof w.__seek === "function") {
         const seek = w.__seek;
@@ -392,7 +455,9 @@ export function pageInstallRuntime(): void {
       throw new Error(
         options.expectHyperFrames
           ? "The HyperFrames runtime did not expose window.__hf with a seek function and a duration."
-          : "The page exposes no way to seek time. Define window.__framevelo = { seek(t), duration }, " +
+          : options.expectRemotion
+            ? "The Remotion bundle did not expose remotion_setFrame; is it a Remotion 4 bundle?"
+            : "The page exposes no way to seek time. Define window.__framevelo = { seek(t), duration }, " +
               "window.__seek(t), or register a paused GSAP timeline on window.__timelines.main.",
       );
     }
@@ -1072,6 +1137,7 @@ export function pageInstallRuntime(): void {
     settle: settleRendering,
     compareScreenshot,
     composite,
+    remotionAssets: () => w.__fvRemotionAssets ?? {},
     captureDataUrl: () => {
       if (!verifyCopy) return "";
       const c = document.createElement("canvas");
