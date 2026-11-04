@@ -1,8 +1,49 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
-import { buildMuxArgs, colorTags, frameTimeBase } from "../src/ffmpeg.ts";
+import { buildMuxArgs, colorTags, durationMismatch, frameTimeBase, probeVideo, trackTimescale } from "../src/ffmpeg.ts";
 
 const valueAfter = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
+
+/** FFmpeg on PATH can make an H.264 stream to mux. */
+const x264 = (() => {
+  try {
+    return execFileSync("ffmpeg", ["-hide_banner", "-encoders"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).includes("libx264");
+  } catch {
+    return false;
+  }
+})();
+
+test("muxed frames last 1/fps each with the FFmpeg on PATH", { skip: !x264 && "needs ffmpeg with libx264" }, async () => {
+  // FFmpeg 8.1 and later put all 150 frames of a 5 s render within 0.05 s; only the length showed it.
+  const dir = mkdtempSync(path.join(os.tmpdir(), "framevelo-mux-"));
+  try {
+    // Annex-B with I and P frames only, as the WebCodecs encoder writes it.
+    const raw = execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "testsrc=size=64x64", "-frames:v", "45", "-c:v", "libx264", "-bf", "0", "-g", "15", "-f", "h264", "-"]);
+    for (const fps of [30, 29.97]) {
+      const output = path.join(dir, `${fps}.mp4`);
+      execFileSync("ffmpeg", buildMuxArgs({ codec: "h264", fps, output }), { input: raw });
+      const probe = await probeVideo(output);
+      assert.equal(probe.packets, 45);
+      assert.equal(durationMismatch(probe, 45, fps), null, `${fps} fps`);
+      const timeBase = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "stream=time_base", "-of", "csv=p=0", output], { encoding: "utf8" }).trim();
+      assert.equal(timeBase, `1/${trackTimescale(fps)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a video that is not its frames' length is caught", () => {
+  const probe = (videoSeconds: number) => ({ codec: "h264", width: 64, height: 64, packets: 150, durationSeconds: videoSeconds, videoSeconds });
+  assert.equal(durationMismatch(probe(5), 150, 30), null);
+  assert.equal(durationMismatch(probe((150 * 1001) / 30000), 150, 29.97), null);
+  assert.equal(durationMismatch(probe(0.049674), 150, 30), "the video lasts 0.050 s, but 150 frames at 30 fps last 5.000 s");
+  assert.ok(durationMismatch(probe(149 / 30), 150, 30), "a frame short");
+});
 
 test("frameTimeBase handles integer and NTSC rates", () => {
   assert.equal(frameTimeBase(30), "1/30");
@@ -13,6 +54,13 @@ test("frameTimeBase handles integer and NTSC rates", () => {
   assert.throws(() => frameTimeBase(12.345));
 });
 
+test("the track timescale makes every frame whole ticks", () => {
+  assert.equal(trackTimescale(30), 15360);
+  assert.equal(trackTimescale(60), 15360);
+  assert.equal(trackTimescale(24), 12288);
+  assert.equal(trackTimescale(29.97), 30000);
+});
+
 test("video-only mux copies the stream, tags BT.709 and stamps frame timestamps", () => {
   const args = buildMuxArgs({ codec: "h264", fps: 30, output: "out.mp4" });
   assert.equal(valueAfter(args, "-f"), "h264");
@@ -20,7 +68,9 @@ test("video-only mux copies the stream, tags BT.709 and stamps frame timestamps"
   assert.equal(valueAfter(args, "-c:v"), "copy");
   const bsf = valueAfter(args, "-bsf:v")!;
   assert.match(bsf, /^h264_metadata=.*colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1/);
-  assert.match(bsf, /setts=ts=N:duration=1:time_base=1\/30$/);
+  // In the filter's own time base: since FFmpeg 8.1, setts rescales its results when time_base is set.
+  assert.match(bsf, /setts=ts=N\*\(1\/30\)\/TB:duration=\(1\/30\)\/TB$/);
+  assert.equal(valueAfter(args, "-video_track_timescale"), "15360");
   // The container's colr box follows the stream parameters, not the rewritten bitstream.
   for (const option of ["-color_primaries", "-color_trc", "-colorspace"]) assert.equal(valueAfter(args, option), "bt709");
   assert.equal(valueAfter(args, "-color_range"), "tv");

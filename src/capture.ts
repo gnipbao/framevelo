@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { appendFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Browser, CDPSession, Page } from "puppeteer-core";
-import { buildMuxArgs, detectAacEncoder, probeVideo, startMux, type MuxProcess, type VideoProbe } from "./ffmpeg.ts";
+import { buildMuxArgs, detectAacEncoder, durationMismatch, probeVideo, startMux, type MuxProcess, type VideoProbe } from "./ffmpeg.ts";
 import { codecString, keyframeInterval, type Codec } from "./options.ts";
 import {
   pageBootstrap,
@@ -489,6 +489,8 @@ export async function captureToFile(job: CaptureJob): Promise<CaptureResult> {
         `Muxed ${probe.packets} video packets from ${pageStats.frames} frames (${pageStats.chunks} encoder chunks, ${pageStats.emptyChunks} empty); expected ${job.frames}.`,
       );
     }
+    const mismatch = durationMismatch(probe, job.frames, job.fps);
+    if (mismatch) throw new Error(`FFmpeg misread the frame timestamps: ${mismatch}.`);
     if (probe.width !== job.width || probe.height !== job.height) {
       throw new Error(`Output is ${probe.width}x${probe.height}, expected ${job.width}x${job.height}.`);
     }
