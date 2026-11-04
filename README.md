@@ -153,7 +153,7 @@ Design notes and the ideas that were measured and dropped: [docs/architecture.md
 
 ```
 framevelo render <input> [options]
-framevelo doctor
+framevelo doctor [--chrome <path>] [--chrome-arg <flag>]
 framevelo browser install [version] | framevelo browser path
 framevelo mcp
 ```
@@ -184,7 +184,22 @@ framevelo mcp
 | `--no-paint-reuse` | | Request a paint for every frame |
 | `--no-video-proxy` | | Seek video sources as they are |
 | `--chrome <path>` | headless shell, then Chrome | Browser binary |
+| `--chrome-arg <flag>` | | Extra Chrome flag, once per flag; see [Chrome flags](#chrome-flags) |
 | `--json`, `-q, --quiet` | | Result as JSON; no progress |
+
+### Chrome flags
+
+FrameVelo starts Chrome with flags of its own (HTML-in-Canvas, no vsync, Metal on macOS). To add more, set `FRAMEVELO_CHROME_ARGS`, which applies to every render, to `doctor` and to the MCP server, or pass `--chrome-arg` to one command, once per flag (`--chrome-arg=--use-angle=d3d11`). Both come after FrameVelo's flags, the variable first. Chrome takes the last value of a switch given twice, so `--use-angle` replaces FrameVelo's, while feature lists such as `--enable-features` add to FrameVelo's. The variable is split at whitespace; quotes keep spaces in a value (`--js-flags="--expose-gc --max-old-space-size=8192"`), and backslashes stay as they are. `framevelo doctor` lists the extra flags it started Chrome with.
+
+On Windows, Chrome can render on SwiftShader or the integrated GPU, and before Windows 11 24H2 its `disable_d3d12_video_encoder` workaround leaves WebCodecs without a hardware encoder. In the report behind this option ([#9](https://github.com/gnipbao/framevelo/issues/9): Windows 11 23H2, RTX 4070 Laptop GPU), `--use-angle=d3d11 --force_high_performance_gpu` moved rendering to the RTX, and `--disable-gpu-driver-bug-workarounds` brought back hardware H.264 and HEVC at 1080p and 4K in full Chrome, though not in `chrome-headless-shell`. In PowerShell, pointing FrameVelo at full Chrome:
+
+```powershell
+$env:FRAMEVELO_CHROME_ARGS = "--use-angle=d3d11 --force_high_performance_gpu --disable-gpu-driver-bug-workarounds"
+$env:FRAMEVELO_CHROME = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+framevelo doctor
+```
+
+`--disable-gpu-driver-bug-workarounds` turns off all of Chrome's GPU driver workarounds, not only that one, so check the renders. MCP clients pass the variable in the server's `env`: `{ "command": "framevelo", "args": ["mcp"], "env": { "FRAMEVELO_CHROME_ARGS": "--use-angle=d3d11" } }`. The `render` tool takes no flags itself: they describe the machine, and some (`--renderer-cmd-prefix`) run commands.
 
 ## API
 

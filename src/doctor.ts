@@ -1,10 +1,14 @@
-import { chromeMajor, findChrome, isHeadlessShell, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
+import type { Browser } from "puppeteer-core";
+import { chromeMajor, extraChromeArgs, findChrome, formatChromeArgs, isHeadlessShell, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
 import { detectAacEncoder, toolVersion } from "./ffmpeg.ts";
 import { loadHyperFrames } from "./hyperframes.ts";
 import { serveDirectory } from "./server.ts";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+/** An error as one line of a check's detail; Puppeteer's launch errors span several. */
+const oneLine = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim();
 
 export interface DoctorCheck {
   name: string;
@@ -20,8 +24,13 @@ interface EncoderSupport {
   any: boolean;
 }
 
-/** Probe the toolchain FrameVelo needs and report what this machine can do. */
-export async function runDoctor(options: { chromePath?: string; ffmpegPath?: string; ffprobePath?: string } = {}): Promise<DoctorCheck[]> {
+/**
+ * Probe the toolchain FrameVelo needs and report what this machine can do. Chrome starts as a render
+ * starts it: with FRAMEVELO_CHROME_ARGS, then `chromeArgs`, after FrameVelo's own flags.
+ */
+export async function runDoctor(
+  options: { chromePath?: string; chromeArgs?: string[]; ffmpegPath?: string; ffprobePath?: string } = {},
+): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
   const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
   const nodeOk = major > 22 || (major === 22 && minor >= 18);
@@ -48,6 +57,16 @@ export async function runDoctor(options: { chromePath?: string; ffmpegPath?: str
     });
   }
 
+  // The user's flags, listed so that a report says which ones the checks below ran with.
+  let flagChecks: DoctorCheck[];
+  try {
+    const extra = extraChromeArgs(options.chromeArgs);
+    flagChecks = extra.length ? [{ name: "Chrome flags", ok: true, optional: true, detail: formatChromeArgs(extra) }] : [];
+  } catch (error) {
+    checks.push({ name: "Chrome flags", ok: false, detail: oneLine(error) });
+    return checks;
+  }
+
   let chromePath: string | null = null;
   try {
     chromePath = findChrome(options.chromePath ? { explicitPath: options.chromePath } : {});
@@ -64,10 +83,16 @@ export async function runDoctor(options: { chromePath?: string; ffmpegPath?: str
   const dir = await mkdtemp(path.join(os.tmpdir(), "framevelo-doctor-"));
   await writeFile(path.join(dir, "index.html"), "<!doctype html><title>doctor</title>");
   const server = await serveDirectory(dir);
-  const browser = await launchChrome(chromePath);
+  let browser: Browser | undefined;
   try {
+    try {
+      browser = await launchChrome(chromePath, options.chromeArgs);
+    } catch (error) {
+      checks.push({ name: "Chrome", ok: false, detail: `${chromePath} did not start: ${oneLine(error)}` }, ...flagChecks);
+      return checks;
+    }
     const version = await browser.version();
-    checks.push({ name: "Chrome", ok: true, detail: `${version} (${chromePath})` });
+    checks.push({ name: "Chrome", ok: true, detail: `${version} (${chromePath})` }, ...flagChecks);
     checks.push({
       name: "Lean browser (headless shell)",
       ok: isHeadlessShell(chromePath),
@@ -117,7 +142,7 @@ export async function runDoctor(options: { chromePath?: string; ffmpegPath?: str
       });
     }
   } finally {
-    await browser.close().catch(() => {});
+    await browser?.close().catch(() => {});
     await server.close();
     await rm(dir, { recursive: true, force: true });
   }

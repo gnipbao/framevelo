@@ -97,6 +97,11 @@ export interface RenderOptions {
    */
   workers?: number;
   chromePath?: string;
+  /**
+   * Extra Chrome flags such as "--use-angle=d3d11", after FrameVelo's own and FRAMEVELO_CHROME_ARGS:
+   * a switch given again takes the later value, and feature lists (--enable-features) are merged.
+   */
+  chromeArgs?: string[];
   ffmpegPath?: string;
   ffprobePath?: string;
   readyTimeoutMs?: number;
@@ -259,7 +264,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
   let browser: Browser | undefined;
   const warnings: string[] = [];
   // Chrome starts while the project compiles; neither needs the other.
-  const browserLaunch = launchChrome(chromePath);
+  const browserLaunch = launchChrome(chromePath, options.chromeArgs);
   browserLaunch.catch(() => {});
   // Closing the browser makes whatever the render is waiting on fail fast.
   const abort = () => void browserLaunch.then((b) => b.close()).catch(() => {});

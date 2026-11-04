@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Chrome flags
+
+- Extra Chrome flags, for machines where Chrome's defaults leave the GPU or the hardware encoder
+  unused. `FRAMEVELO_CHROME_ARGS` applies to every launch (renders, `doctor`, the MCP server) and is
+  split at whitespace, with quotes for values that contain spaces; `--chrome-arg <flag>`
+  (repeatable) adds one to a `render` or `doctor` command, as `chromeArgs` does in the API. They
+  come after FrameVelo's flags, the variable first: a switch given again takes the user's value,
+  and feature lists such as `--enable-features` are merged, so HTML-in-Canvas stays on. On Windows
+  11 23H2 with an RTX 4070 Laptop GPU ([#9](https://github.com/gnipbao/framevelo/issues/9)),
+  `--use-angle=d3d11 --force_high_performance_gpu` moved rendering to the RTX, and
+  `--disable-gpu-driver-bug-workarounds` brought hardware H.264 and HEVC back in full Chrome.
+- `framevelo doctor` lists the extra flags it started Chrome with, and reports a malformed flag, or
+  a Chrome that does not start with the flags, as a failed check instead of stopping with an error.
+- The MCP `render` tool has no flags argument: flags describe the machine, and some run commands
+  (`--renderer-cmd-prefix`), so the server takes them from its environment.
+
 ### Fixes
 
 - Paint reuse counted frames it did not reuse. Each requested paint left its handler on the capture

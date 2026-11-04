@@ -18,6 +18,9 @@ const INSTRUCTIONS = `FrameVelo renders code-driven videos to MP4 on the GPU and
 - Check a composition cheaply first: render a slice (start, frames: 30) with quality "draft".
 - If a render fails before capturing (no Chrome, no FFmpeg), call doctor; install_browser fixes a missing Chrome.`;
 
+// Chrome flags are not a tool argument: they describe the machine (its GPU and driver), and some
+// (--renderer-cmd-prefix, --gpu-launcher) run commands. The tools use FRAMEVELO_CHROME_ARGS from the
+// environment the client starts the server with.
 const TOOLS = [
   {
     name: "render",

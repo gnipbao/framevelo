@@ -82,6 +82,7 @@ Every frame must be a pure function of time. FrameVelo seeks the page through th
 |---|---|
 | `Chrome not found` | Call `install_browser` (or run `framevelo browser install`), then render again. |
 | `FFmpeg` / `FFprobe` failing in `doctor` | Ask the user to install FFmpeg (`brew install ffmpeg`). Don't install system software yourself. |
+| `doctor` on Windows: a SwiftShader GPU, or no hardware encoder | H.264 still renders, more slowly; HEVC needs a hardware encoder. Chrome flags may help: suggest the user set `FRAMEVELO_CHROME_ARGS` (for the MCP server, in its `env`) as the README's "Chrome flags" describes, e.g. `--use-angle=d3d11 --force_high_performance_gpu`. Don't change their environment yourself. |
 | `The page exposes no way to seek time` | The page needs a time driver; see "Making a page renderable". |
 | `Unknown duration` | Pass `duration` or `frames`, or declare the duration in the page. |
 | `The composition failed to set up` | A script error in the composition. Fix the page; the message carries the page error. |
