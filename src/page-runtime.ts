@@ -581,15 +581,21 @@ export function pageInstallRuntime(): void {
     if (mode === "dom" && chromeHasDrawElement) {
       capture = document.createElement("canvas");
       capture.id = "__fv_capture";
+      // Chrome 157 lays out and draws canvas children with content="drawable" on the canvas and
+      // `drawable` on each child drawn; earlier versions with layoutsubtree.
       capture.setAttribute("layoutsubtree", "");
+      capture.setAttribute("content", "drawable");
       // Positioned so absolutely positioned children keep the composition as containing block.
       capture.style.cssText = `display:block;position:relative;width:${cssWidth}px;height:${cssHeight}px;margin:0;padding:0;border:0;`;
       target.parentNode!.insertBefore(capture, target);
       capture.appendChild(target);
+      target.setAttribute("drawable", "");
       // A paint-level change outside the captured element guarantees a paint event, and a fresh
       // snapshot, even when nothing in the composition changed since the last frame.
       sentinel = document.createElement("div");
       sentinel.style.cssText = "position:absolute;left:0;top:0;width:1px;height:1px;opacity:0.01;pointer-events:none;background:#000";
+      // Laid out (and so painted) only when drawable.
+      sentinel.setAttribute("drawable", "");
       capture.appendChild(sentinel);
       for (const canvas of w.__fvAccelCanvases ?? []) {
         if (target.contains(canvas)) {
@@ -728,7 +734,7 @@ export function pageInstallRuntime(): void {
     if (!w.__hf_page_composite_pending) return;
     if (!(await w.__hf_page_composite_prepare?.())) return;
     // The shader reads the staged scene clones with drawElementImage: paint them first.
-    const staging = Array.from(document.querySelectorAll<HTMLCanvasElement>("canvas[layoutsubtree]")).filter(
+    const staging = Array.from(document.querySelectorAll<HTMLCanvasElement>('canvas[layoutsubtree], canvas[content="drawable"]')).filter(
       (canvas) => canvas !== state?.capture && canvas.id !== OVERLAY_ID,
     );
     await Promise.all(

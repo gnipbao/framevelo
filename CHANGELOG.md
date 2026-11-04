@@ -11,6 +11,9 @@
   which FFmpeg reads the same way before and after 8.1, and the MP4 track timescale stays as it
   was (15360 at 30 fps). A render whose video does not last frames/fps now fails: the check
   counted packets, and they were all there.
+- Chrome 157 (the current headless shell and Google Chrome) failed every DOM page:
+  `drawElementImage` now requires `content="drawable"` on the canvas and `drawable` on the element
+  drawn, where earlier versions read `layoutsubtree`. The capture canvas carries both.
 - Paint reuse counted frames it did not reuse. Each requested paint left its handler on the capture
   canvas, which went on drawing the composition whenever Chrome painted it, and cleared the flag that
   reuse is decided on: a 1080×1920 Remotion render reported 6398 of its 6399 frames as reused while

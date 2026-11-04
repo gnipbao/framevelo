@@ -141,7 +141,7 @@ args = ["mcp"]
 ## How it works
 
 - **Canvas pages**: the `<canvas>` is the frame.
-- **DOM pages**: the captured element moves into a `<canvas layoutsubtree>` and is drawn with `drawElementImage`. The canvas backing store is the output size, so `--scale 2` re-rasterizes a 1080p layout at 4K.
+- **DOM pages**: the captured element moves into a `<canvas content="drawable">` (`layoutsubtree` before Chrome 157) and is drawn with `drawElementImage`. The canvas backing store is the output size, so `--scale 2` re-rasterizes a 1080p layout at 4K.
 - **Verification**: before encoding, sampled frames of every interval (split at clip boundaries) are painted both ways and compared with a native screenshot; an interval below `--verify-threshold` (30 dB) is captured with screenshots through the same encoder.
 - **Paint reuse**: the capture canvas is drawn in every paint event Chrome fires for the composition, so a frame requests a paint of its own only for changes made after the last one, and a frame in which nothing changed is encoded as it was. The frames are the same with `--no-paint-reuse`.
 - **Parallel pages**: frames that Node drives one by one (HyperFrames video frames, screenshot intervals) are latency-bound, so long runs of them are split across pages, each with its own encoder, and concatenated before muxing.

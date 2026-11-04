@@ -47,9 +47,10 @@ the playhead is parked quietly, so callbacks such as GSAP `.call()` fire once ea
 
 **Canvas mode.** The page's `<canvas>` is the frame.
 
-**DOM mode.** The captured element is moved into a `<canvas layoutsubtree>` and drawn with
-`drawElementImage` inside the canvas's `paint` event. Details that matter, most learned from the
-official HyperFrames capture code:
+**DOM mode.** The captured element is moved into a `<canvas content="drawable">`, with `drawable` on
+itself, and drawn with `drawElementImage` inside the canvas's `paint` event. Chrome 157 requires those
+attributes; earlier versions read `layoutsubtree` on the canvas, which is set as well. Details that
+matter, most learned from the official HyperFrames capture code:
 
 - The canvas backing store is the output size and its CSS size the layout size, so `--scale 2`
   re-rasterizes vector content at 4K instead of upscaling.
