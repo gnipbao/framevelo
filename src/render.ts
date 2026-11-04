@@ -13,7 +13,7 @@ import {
   type CaptureWorker,
 } from "./capture.ts";
 import { chromeMajor, findChrome, framevelCacheDir, isHeadlessShell, launchChrome, MIN_DOM_CHROME_MAJOR } from "./chrome.ts";
-import { probeVideo, remuxWithAudio } from "./ffmpeg.ts";
+import { durationMismatch, probeVideo, remuxWithAudio } from "./ffmpeg.ts";
 import { ensureProxy } from "./media-proxy.ts";
 import { isHyperFramesHtml, loadHyperFrames, PAGE_SIDE_COMPOSITING_FLAG, prepareHyperFramesSite, type HyperFramesSite } from "./hyperframes.ts";
 import { defaultBitrate, evenDimension, frameCount, subframeOffsets, type Codec, type Quality } from "./options.ts";
@@ -487,6 +487,8 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
           await remuxWithAudio(videoOnly, mixed, staging, options.ffmpegPath);
           probe = await probeVideo(staging, options.ffprobePath);
           if (probe.packets !== frames || !probe.audioCodec) throw new Error(`Adding the audio left ${probe.packets} video packets (expected ${frames}) and audio ${probe.audioCodec ?? "missing"}.`);
+          const mismatch = durationMismatch(probe, frames, fps);
+          if (mismatch) throw new Error(`Adding the audio changed the video timestamps: ${mismatch}.`);
           await rename(staging, finalOutput);
           log(`audio: mixed by remotion in ${Math.round(performance.now() - a0)} ms`);
         } else {

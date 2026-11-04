@@ -141,7 +141,7 @@ args = ["mcp"]
 ## 工作原理
 
 - **Canvas 页面**：`<canvas>` 本身就是画面。
-- **DOM 页面**：被采集的元素移进 `<canvas layoutsubtree>`，用 `drawElementImage` 绘制。画布后备尺寸等于输出尺寸，`--scale 2` 会把 1080p 布局按 4K 重新光栅化。
+- **DOM 页面**：被采集的元素移进 `<canvas content="drawable">`（Chrome 157 之前是 `layoutsubtree`），用 `drawElementImage` 绘制。画布后备尺寸等于输出尺寸，`--scale 2` 会把 1080p 布局按 4K 重新光栅化。
 - **自校验**：编码前，每个区间（按片段边界切分）的采样帧分别用两种方式绘制并与原生截图比对；低于 `--verify-threshold`（30 dB）的区间改用截图采集，仍走同一个编码器。
 - **绘制复用**：Chrome 每次为合成内容触发 paint 事件时，FrameVelo 都会把内容画到捕获画布上。因此只有在上次绘制之后又发生变化的帧才需要单独请求绘制，没有任何变化的帧按原样编码。使用 `--no-paint-reuse` 时，帧画面完全相同。
 - **多页面并行**：需要 Node 逐帧驱动的帧（HyperFrames 视频帧、截图区间）受往返延迟限制，较长的这类帧段会分给多个页面，各用自己的编码器，最后按顺序拼接再封装。
