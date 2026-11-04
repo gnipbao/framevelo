@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { buildMuxArgs, colorTags, durationMismatch, frameTimeBase, probeVideo } from "../src/ffmpeg.ts";
+import { buildMuxArgs, colorTags, durationMismatch, frameTimeBase, probeVideo, trackTimescale } from "../src/ffmpeg.ts";
 
 const valueAfter = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
 
@@ -29,6 +29,8 @@ test("muxed frames last 1/fps each with the FFmpeg on PATH", { skip: !x264 && "n
       const probe = await probeVideo(output);
       assert.equal(probe.packets, 45);
       assert.equal(durationMismatch(probe, 45, fps), null, `${fps} fps`);
+      const timeBase = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "stream=time_base", "-of", "csv=p=0", output], { encoding: "utf8" }).trim();
+      assert.equal(timeBase, `1/${trackTimescale(fps)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -52,6 +54,13 @@ test("frameTimeBase handles integer and NTSC rates", () => {
   assert.throws(() => frameTimeBase(12.345));
 });
 
+test("the track timescale makes every frame whole ticks", () => {
+  assert.equal(trackTimescale(30), 15360);
+  assert.equal(trackTimescale(60), 15360);
+  assert.equal(trackTimescale(24), 12288);
+  assert.equal(trackTimescale(29.97), 30000);
+});
+
 test("video-only mux copies the stream, tags BT.709 and stamps frame timestamps", () => {
   const args = buildMuxArgs({ codec: "h264", fps: 30, output: "out.mp4" });
   assert.equal(valueAfter(args, "-f"), "h264");
@@ -59,7 +68,9 @@ test("video-only mux copies the stream, tags BT.709 and stamps frame timestamps"
   assert.equal(valueAfter(args, "-c:v"), "copy");
   const bsf = valueAfter(args, "-bsf:v")!;
   assert.match(bsf, /^h264_metadata=.*colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1/);
-  assert.match(bsf, /setts=ts=N:duration=1:time_base=1\/30$/);
+  // In the filter's own time base: since FFmpeg 8.1, setts rescales its results when time_base is set.
+  assert.match(bsf, /setts=ts=N\*\(1\/30\)\/TB:duration=\(1\/30\)\/TB$/);
+  assert.equal(valueAfter(args, "-video_track_timescale"), "15360");
   // The container's colr box follows the stream parameters, not the rewritten bitstream.
   for (const option of ["-color_primaries", "-color_trc", "-colorspace"]) assert.equal(valueAfter(args, option), "bt709");
   assert.equal(valueAfter(args, "-color_range"), "tv");

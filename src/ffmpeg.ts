@@ -50,20 +50,34 @@ export function frameTimeBase(fps: number): string {
 }
 
 /**
+ * MP4 track timescale for `fps`: the frame time base's denominator doubled to at least 10000, which
+ * FFmpeg's MP4 muxer picks for a 1/fps stream (15360 at 30 fps), so that a frame is whole ticks.
+ */
+export function trackTimescale(fps: number): number {
+  let scale = Number(frameTimeBase(fps).split("/")[1]);
+  while (scale < 10000) scale *= 2;
+  return scale;
+}
+
+/**
  * FFmpeg arguments that read the encoder's Annex-B stream from stdin and copy it into an MP4
  * without decoding or re-encoding.
  *
  * Bitstream filters: `*_metadata` rewrites the VUI to the stream's colour space with the BT.709
- * transfer (see colorTags; the colour options do the same for the MP4 colr box), and `setts` gives
- * frame N the
- * timestamp N. Raw Annex-B carries no timestamps; without them `-shortest` drops the audio track.
- * Frame-index timestamps are exact because the encoder emits I and P frames only, in order.
+ * transfer (see colorTags; the colour options do the same for the MP4 colr box), and `setts` stamps
+ * frame N with N frame durations. Raw Annex-B carries no timestamps; without them `-shortest` drops
+ * the audio track. Frame-index timestamps are exact because the encoder emits I and P frames only,
+ * in order.
  */
 export function buildMuxArgs(options: MuxArgsOptions): string[] {
   const { codec, fps, output, audio } = options;
   const tags = colorTags(options.colorSpace);
   const metadataFilter = `${codec === "hevc" ? "hevc" : "h264"}_metadata=video_full_range_flag=${tags.fullRange ? 1 : 0}:colour_primaries=${tags.primariesCode}:transfer_characteristics=1:matrix_coefficients=${tags.matrixCode}`;
-  const timestampFilter = `setts=ts=N:duration=1:time_base=${frameTimeBase(fps)}`;
+  // In the filter's own time base (TB), with no time_base option: since FFmpeg 8.1, setts rescales
+  // its results from TB whenever time_base is set, and `ts=N:time_base=1/30` collapsed every frame
+  // to 0, which the muxer then spread one tick apart (5 s of video in 0.05 s).
+  const frame = `(${frameTimeBase(fps)})/TB`;
+  const timestampFilter = `setts=ts=N*${frame}:duration=${frame}`;
   return [
     "-hide_banner",
     "-loglevel",
@@ -96,6 +110,9 @@ export function buildMuxArgs(options: MuxArgsOptions): string[] {
     "-color_range",
     tags.fullRange ? "pc" : "tv",
     ...(codec === "hevc" ? ["-tag:v", "hvc1"] : []),
+    // TB is the raw demuxer's 1/1200000; keep the timescale the muxer chose for a 1/fps stream.
+    "-video_track_timescale",
+    String(trackTimescale(fps)),
     ...(audio
       ? options.audioEncoder === "copy"
         ? ["-c:a", "copy"]

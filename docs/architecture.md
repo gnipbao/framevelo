@@ -89,11 +89,14 @@ which only copies the stream: `h264_metadata`/`hevc_metadata` rewrites the VUI w
 transfer (Chrome tags canvas frames with sRGB, which players do not expect from video) and with the
 range, matrix and primaries the encoder reports for its output (`decoderConfig.colorSpace`: Chrome's
 software H.264 encoder on Windows writes full range, the others limited range). The muxer starts with
-the first encoded bytes, which that report precedes. `setts` gives frame N the timestamp N (raw
-Annex-B has none; the encoder emits only I and P frames, so this is exact). Audio is limited on its input with `-t`,
+the first encoded bytes, which that report precedes. `setts` gives frame N the timestamp of N frame
+durations (raw Annex-B has none; the encoder emits only I and P frames, so this is exact), written in
+the filter's own time base: since FFmpeg 8.1 its `time_base` option rescales the results, which put
+every frame within the first 0.05 s. The MP4 track timescale is set to what the muxer chose for a
+1/fps stream (15360 at 30 fps). Audio is limited on its input with `-t`,
 never with `-shortest` or an output `-t`, which drop trailing video frames when the audio is shorter or
 starts before zero. The file is written under a temporary name, checked with ffprobe (exact packet
-count, size, audio present) and renamed.
+count, a video that lasts frames/fps, size, audio present) and renamed.
 
 ## Routes, verification and fallback
 
