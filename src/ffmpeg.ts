@@ -180,6 +180,8 @@ export interface VideoProbe {
   height: number;
   packets: number;
   durationSeconds: number;
+  /** Duration of the video stream itself; the container's can be the audio's. */
+  videoSeconds: number;
   colorTransfer?: string;
   audioCodec?: string;
 }
@@ -188,11 +190,11 @@ export interface VideoProbe {
 export async function probeVideo(file: string, ffprobePath = "ffprobe"): Promise<VideoProbe> {
   const { stdout } = await execFileAsync(
     ffprobePath,
-    ["-v", "error", "-count_packets", "-show_entries", "stream=codec_type,codec_name,width,height,nb_read_packets,color_transfer:format=duration", "-of", "json", file],
+    ["-v", "error", "-count_packets", "-show_entries", "stream=codec_type,codec_name,width,height,nb_read_packets,color_transfer,duration:format=duration", "-of", "json", file],
     { maxBuffer: 8 << 20 },
   );
   const parsed = JSON.parse(stdout) as {
-    streams?: Array<{ codec_type?: string; codec_name?: string; width?: number; height?: number; nb_read_packets?: string; color_transfer?: string }>;
+    streams?: Array<{ codec_type?: string; codec_name?: string; width?: number; height?: number; nb_read_packets?: string; color_transfer?: string; duration?: string }>;
     format?: { duration?: string };
   };
   const video = parsed.streams?.find((s) => s.codec_type === "video");
@@ -204,9 +206,21 @@ export async function probeVideo(file: string, ffprobePath = "ffprobe"): Promise
     height: video.height ?? 0,
     packets: Number(video.nb_read_packets ?? 0),
     durationSeconds: Number(parsed.format?.duration ?? 0),
+    videoSeconds: Number(video.duration ?? 0),
     ...(video.color_transfer ? { colorTransfer: video.color_transfer } : {}),
     ...(audio?.codec_name ? { audioCodec: audio.codec_name } : {}),
   };
+}
+
+/**
+ * How a muxed video differs from `frames` frames at `fps` in length, or null when it does not. The
+ * packet count misses timestamps the muxer misread: every frame is there, and they play in 0.05 s.
+ */
+export function durationMismatch(probe: VideoProbe, frames: number, fps: number): string | null {
+  const expected = frames / fps;
+  // Within half a frame: a frame too many or too few, or timestamps in the wrong unit, are more.
+  if (Math.abs(probe.videoSeconds - expected) < 0.5 / fps) return null;
+  return `the video lasts ${probe.videoSeconds.toFixed(3)} s, but ${frames} frames at ${fps} fps last ${expected.toFixed(3)} s`;
 }
 
 export async function toolVersion(binary: string): Promise<string | null> {
