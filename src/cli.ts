@@ -14,7 +14,8 @@ const HELP = `FrameVelo: a rendering accelerator for code-driven videos.
 
 Usage:
   framevelo render <input> [options]   Render an HTML page or project directory to MP4
-  framevelo doctor [--chrome <path>]   Check Chrome, WebCodecs encoders and FFmpeg on this machine
+  framevelo doctor [options]           Check Chrome, WebCodecs encoders and FFmpeg on this machine;
+                                       takes --chrome, --chrome-arg and --json as render does
   framevelo browser install [version]  Install chrome-headless-shell (default: stable) into the
                                        FrameVelo cache; about half the CPU and memory of full Chrome
   framevelo browser path               Print the Chrome binary FrameVelo would use
@@ -63,6 +64,8 @@ Render options:
                           --mount /vendor/=~/shared/vendor
       --chrome <path>     Chrome binary (default: FRAMEVELO_CHROME, newest chrome-headless-shell 151+
                           in the FrameVelo/HyperFrames/Puppeteer caches, then installed Chrome)
+      --chrome-arg <flag> Extra Chrome flag, e.g. --chrome-arg=--use-angle=d3d11 (repeatable), after
+                          FrameVelo's own flags and those in FRAMEVELO_CHROME_ARGS (split at spaces)
       --json              Print the result as JSON
   -q, --quiet             No progress output
 `;
@@ -95,6 +98,20 @@ function parseProps(value: string): unknown {
   }
 }
 
+/**
+ * Read `--chrome-arg --flag` as `--chrome-arg=--flag`: a Chrome flag starts with a dash, and parseArgs
+ * refuses a separate value that does.
+ */
+function joinChromeArgs(argv: string[]): string[] {
+  const joined: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (arg === "--") return [...joined, ...argv.slice(i)];
+    joined.push(arg === "--chrome-arg" && i + 1 < argv.length ? `--chrome-arg=${argv[++i]}` : arg);
+  }
+  return joined;
+}
+
 function defaultOutput(input: string): string {
   const resolved = path.resolve(input);
   const base = path.extname(resolved) ? path.basename(resolved, path.extname(resolved)) : path.basename(resolved);
@@ -103,7 +120,7 @@ function defaultOutput(input: string): string {
 
 async function renderCommand(argv: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
-    args: argv,
+    args: joinChromeArgs(argv),
     allowPositionals: true,
     options: {
       output: { type: "string", short: "o" },
@@ -130,6 +147,7 @@ async function renderCommand(argv: string[]): Promise<void> {
       shutter: { type: "string" },
       background: { type: "string" },
       chrome: { type: "string" },
+      "chrome-arg": { type: "string", multiple: true },
       mount: { type: "string", multiple: true },
       "no-hyperframes": { type: "boolean" },
       composition: { type: "string" },
@@ -190,6 +208,7 @@ async function renderCommand(argv: string[]): Promise<void> {
   assign("shutter", numberOption("shutter", values.shutter, (n) => n >= 0 && n <= 1));
   assign("background", values.background);
   assign("chromePath", values.chrome);
+  assign("chromeArgs", values["chrome-arg"]);
   if (values["no-hyperframes"]) options.hyperframes = "off";
   assign("composition", values.composition);
   if (values.props !== undefined) options.props = parseProps(values.props);
@@ -218,8 +237,14 @@ async function renderCommand(argv: string[]): Promise<void> {
 }
 
 async function doctorCommand(argv: string[]): Promise<void> {
-  const { values } = parseArgs({ args: argv, options: { chrome: { type: "string" }, json: { type: "boolean" } } });
-  const checks = await runDoctor(values.chrome ? { chromePath: values.chrome } : {});
+  const { values } = parseArgs({
+    args: joinChromeArgs(argv),
+    options: { chrome: { type: "string" }, "chrome-arg": { type: "string", multiple: true }, json: { type: "boolean" } },
+  });
+  const checks = await runDoctor({
+    ...(values.chrome ? { chromePath: values.chrome } : {}),
+    ...(values["chrome-arg"] ? { chromeArgs: values["chrome-arg"] } : {}),
+  });
   if (values.json) {
     process.stdout.write(`${JSON.stringify(checks, null, 2)}\n`);
   } else {

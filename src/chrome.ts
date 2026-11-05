@@ -137,9 +137,12 @@ export function chromeMajor(version: string): number {
 
 /**
  * Flags for offline frame rendering: GPU raster on the platform backend, HTML-in-Canvas enabled,
- * and no vsync or background throttling pacing the paint loop.
+ * and no vsync or background throttling pacing the paint loop. `extra` (the user's flags) comes
+ * last: Chrome takes the last value of a switch given twice, so a user's `--use-angle` replaces
+ * FrameVelo's, while feature lists add up (Puppeteer joins `--enable-features` and
+ * `--disable-features`, Chrome joins `--enable-blink-features`), so HTML-in-Canvas stays on.
  */
-export function chromeArgs(platform: NodeJS.Platform = process.platform): string[] {
+export function chromeArgs(platform: NodeJS.Platform = process.platform, extra: readonly string[] = []): string[] {
   return [
     "--enable-features=CanvasDrawElement",
     "--enable-blink-features=CanvasDrawElement",
@@ -152,14 +155,71 @@ export function chromeArgs(platform: NodeJS.Platform = process.platform): string
     "--disable-background-timer-throttling",
     "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows",
+    ...extra,
   ];
 }
 
-export async function launchChrome(executablePath: string): Promise<Browser> {
+/**
+ * Split a list of Chrome flags such as FRAMEVELO_CHROME_ARGS. Whitespace separates flags, a flag
+ * keeps its value (`--use-angle=d3d11`), and quotes keep spaces in one
+ * (`--js-flags="--expose-gc --max-old-space-size=8192"`). Backslashes are ordinary characters, so
+ * Windows paths need no escaping.
+ */
+export function parseChromeArgs(text: string, source = "Chrome flags"): string[] {
+  const flags: string[] = [];
+  let flag = "";
+  let inFlag = false;
+  let quote = "";
+  for (const char of text) {
+    if (quote) {
+      if (char === quote) quote = "";
+      else flag += char;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      inFlag = true;
+    } else if (/\s/.test(char)) {
+      if (inFlag) flags.push(flag);
+      flag = "";
+      inFlag = false;
+    } else {
+      flag += char;
+      inFlag = true;
+    }
+  }
+  if (quote) throw new Error(`${source} has an unclosed ${quote}: ${text}`);
+  if (inFlag) flags.push(flag);
+  for (const each of flags) checkChromeArg(each, source);
+  return flags;
+}
+
+/** A flag that is not a switch would reach Chrome as a URL to open. */
+function checkChromeArg(flag: string, source: string): void {
+  if (!/^--?[^-\s=]/.test(flag)) throw new Error(`${source}: "${flag}" is not a Chrome flag; flags look like --name or --name=value.`);
+}
+
+/** The user's Chrome flags, in the order Chrome gets them: FRAMEVELO_CHROME_ARGS, then `explicit`. */
+export function extraChromeArgs(explicit: readonly string[] = [], env: NodeJS.ProcessEnv = process.env): string[] {
+  for (const flag of explicit) checkChromeArg(flag, "--chrome-arg");
+  return [...parseChromeArgs(env.FRAMEVELO_CHROME_ARGS ?? "", "FRAMEVELO_CHROME_ARGS"), ...explicit];
+}
+
+/** Flags as one line that parseChromeArgs reads back the same, for FRAMEVELO_CHROME_ARGS. */
+export function formatChromeArgs(flags: readonly string[]): string {
+  const quoted = (flag: string) =>
+    !/[\s"']/.test(flag) ? flag : !flag.includes('"') ? `"${flag}"` : `'${flag.replaceAll("'", `'"'"'`)}'`;
+  return flags.map(quoted).join(" ");
+}
+
+/**
+ * Start Chrome with FrameVelo's flags, then FRAMEVELO_CHROME_ARGS, then `extraArgs`. The flags are
+ * checked before the promise is made, so a malformed one throws here rather than after a compile.
+ */
+export function launchChrome(executablePath: string, extraArgs: readonly string[] = []): Promise<Browser> {
+  const args = chromeArgs(process.platform, extraChromeArgs(extraArgs));
   return puppeteer.launch({
     executablePath,
     headless: isHeadlessShell(executablePath) ? "shell" : true,
-    args: chromeArgs(),
+    args,
     // A long render is one evaluate call; progress arrives through bindings instead.
     protocolTimeout: 0,
   });

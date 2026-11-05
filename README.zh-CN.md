@@ -153,7 +153,7 @@ args = ["mcp"]
 
 ```
 framevelo render <input> [options]
-framevelo doctor
+framevelo doctor [--chrome <path>] [--chrome-arg <flag>]
 framevelo browser install [version] | framevelo browser path
 framevelo mcp
 ```
@@ -184,7 +184,22 @@ framevelo mcp
 | `--no-paint-reuse` | | 每帧都请求一次绘制 |
 | `--no-video-proxy` | | 不生成视频代理，直接定位源文件 |
 | `--chrome <path>` | 先 headless shell，再 Chrome | 浏览器可执行文件 |
+| `--chrome-arg <flag>` | | 额外的 Chrome 启动参数，每个参数传一次；见 [Chrome 启动参数](#chrome-启动参数) |
 | `--json`、`-q, --quiet` | | 以 JSON 输出结果；不显示进度 |
+
+### Chrome 启动参数
+
+FrameVelo 启动 Chrome 时会带上自己的参数（HTML-in-Canvas、关闭垂直同步、macOS 上用 Metal）。要再加参数，可以设置 `FRAMEVELO_CHROME_ARGS`，它对每次渲染、`doctor` 和 MCP 服务都生效；也可以给单条命令传 `--chrome-arg`，每个参数传一次（`--chrome-arg=--use-angle=d3d11`）。两者都排在 FrameVelo 自己的参数之后，环境变量在前。同一个开关出现两次时，Chrome 取最后一个值，所以 `--use-angle` 会替换 FrameVelo 的设置；`--enable-features` 这类特性列表则会并入 FrameVelo 的列表。环境变量按空白拆分；值里有空格时加引号（`--js-flags="--expose-gc --max-old-space-size=8192"`），反斜杠原样保留。`framevelo doctor` 会列出它启动 Chrome 时额外用了哪些参数。
+
+在 Windows 上，Chrome 可能用 SwiftShader 或集成显卡渲染；在 Windows 11 24H2 之前的版本上，它的 `disable_d3d12_video_encoder` 规避措施还会让 WebCodecs 找不到硬件编码器。促成这个选项的报告（[#9](https://github.com/gnipbao/framevelo/issues/9)：Windows 11 23H2、RTX 4070 笔记本显卡）中，`--use-angle=d3d11 --force_high_performance_gpu` 让渲染改用 RTX 显卡，`--disable-gpu-driver-bug-workarounds` 让完整版 Chrome 重新支持 1080p 和 4K 的硬件 H.264、HEVC 编码，但 `chrome-headless-shell` 仍然没有。在 PowerShell 中这样设置，让 FrameVelo 改用完整版 Chrome：
+
+```powershell
+$env:FRAMEVELO_CHROME_ARGS = "--use-angle=d3d11 --force_high_performance_gpu --disable-gpu-driver-bug-workarounds"
+$env:FRAMEVELO_CHROME = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+framevelo doctor
+```
+
+`--disable-gpu-driver-bug-workarounds` 会关闭 Chrome 针对显卡驱动的全部规避措施，不只这一条，请检查渲染结果。MCP 客户端在服务配置的 `env` 里设置这个变量：`{ "command": "framevelo", "args": ["mcp"], "env": { "FRAMEVELO_CHROME_ARGS": "--use-angle=d3d11" } }`。`render` 工具本身不接受启动参数：这些参数描述的是机器，而且有些（如 `--renderer-cmd-prefix`）会执行命令。
 
 ## API
 

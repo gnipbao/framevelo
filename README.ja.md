@@ -153,7 +153,7 @@ args = ["mcp"]
 
 ```
 framevelo render <input> [options]
-framevelo doctor
+framevelo doctor [--chrome <path>] [--chrome-arg <flag>]
 framevelo browser install [version] | framevelo browser path
 framevelo mcp
 ```
@@ -184,7 +184,22 @@ framevelo mcp
 | `--no-paint-reuse` | | 毎フレーム描画を要求する |
 | `--no-video-proxy` | | 動画ソースをそのままシーク |
 | `--chrome <path>` | headless shell、次に Chrome | ブラウザの実行ファイル |
+| `--chrome-arg <flag>` | | Chrome に追加するフラグ。フラグごとに 1 回指定。[Chrome のフラグ](#chrome-のフラグ)を参照 |
 | `--json`、`-q, --quiet` | | 結果を JSON で出力。進捗を表示しない |
+
+### Chrome のフラグ
+
+FrameVelo は独自のフラグ（HTML-in-Canvas、垂直同期の無効化、macOS では Metal）を付けて Chrome を起動します。フラグを追加するには、すべてのレンダリング、`doctor`、MCP サーバーに効く `FRAMEVELO_CHROME_ARGS` を設定するか、1 回のコマンドに `--chrome-arg` をフラグごとに渡します（`--chrome-arg=--use-angle=d3d11`）。どちらも FrameVelo のフラグの後ろに付き、環境変数が先です。同じスイッチが 2 回あると Chrome は最後の値を使うので、`--use-angle` は FrameVelo の指定を置き換えます。一方、`--enable-features` のような機能リストは FrameVelo のリストに追加されます。環境変数は空白で区切ります。値に空白を含めるときは引用符で囲み（`--js-flags="--expose-gc --max-old-space-size=8192"`）、バックスラッシュはそのまま残ります。`framevelo doctor` は Chrome の起動に使った追加フラグを表示します。
+
+Windows では Chrome が SwiftShader や内蔵 GPU で描画することがあり、Windows 11 24H2 より前では `disable_d3d12_video_encoder` という回避策のために WebCodecs からハードウェアエンコーダーが見えなくなります。このオプションのきっかけになった報告（[#9](https://github.com/gnipbao/framevelo/issues/9)：Windows 11 23H2、RTX 4070 Laptop GPU）では、`--use-angle=d3d11 --force_high_performance_gpu` で描画が RTX に移り、`--disable-gpu-driver-bug-workarounds` を付けると通常の Chrome で 1080p と 4K のハードウェア H.264・HEVC が使えるようになりました。`chrome-headless-shell` では使えないままでした。PowerShell で、FrameVelo に通常の Chrome を使わせる例：
+
+```powershell
+$env:FRAMEVELO_CHROME_ARGS = "--use-angle=d3d11 --force_high_performance_gpu --disable-gpu-driver-bug-workarounds"
+$env:FRAMEVELO_CHROME = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+framevelo doctor
+```
+
+`--disable-gpu-driver-bug-workarounds` はこの回避策だけでなく、Chrome が GPU ドライバー向けに入れている回避策をすべて無効にするので、レンダリング結果を確認してください。MCP クライアントでは、サーバー設定の `env` に変数を書きます：`{ "command": "framevelo", "args": ["mcp"], "env": { "FRAMEVELO_CHROME_ARGS": "--use-angle=d3d11" } }`。`render` ツール自体はフラグを受け取りません。フラグはマシンに関する設定で、`--renderer-cmd-prefix` のようにコマンドを実行するものもあるためです。
 
 ## API
 

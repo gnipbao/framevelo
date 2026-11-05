@@ -233,6 +233,22 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     assert.ok(min === "inf" || Number(min) > 40, `the same frames with and without reuse (min PSNR ${min} dB)`);
   });
 
+  test("doctor starts Chrome with the user's flags after FrameVelo's, and lists them", async () => {
+    const saved = process.env.FRAMEVELO_CHROME_ARGS;
+    process.env.FRAMEVELO_CHROME_ARGS = "--use-angle=swiftshader";
+    try {
+      const checks = await runDoctor({ chromeArgs: ["--enable-unsafe-swiftshader"] });
+      const detail = (name: string) => checks.find((check) => check.name === name)?.detail ?? "";
+      assert.equal(detail("Chrome flags"), "--use-angle=swiftshader --enable-unsafe-swiftshader");
+      // FrameVelo asks for Metal on macOS; the user's --use-angle comes later, and Chrome takes it.
+      assert.match(detail("GPU"), /swiftshader/i);
+      assert.match(detail("DOM capture (drawElementImage)"), /^available/);
+    } finally {
+      if (saved === undefined) delete process.env.FRAMEVELO_CHROME_ARGS;
+      else process.env.FRAMEVELO_CHROME_ARGS = saved;
+    }
+  });
+
   test("a page without a time driver fails clearly and leaves no partial file", async () => {
     const output = path.join(dir, "fail.mp4");
     await assert.rejects(
