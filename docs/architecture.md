@@ -127,20 +127,25 @@ workers (about 0.4 s each); the verified main page only releases its encoder.
 A page with a `data-composition-id` root is rendered through the official pipeline when the optional
 peer `@hyperframes/producer` is installed:
 
-1. `plan()` from `@hyperframes/producer/distributed` compiles the project (fonts, sub-compositions,
-   inlined scripts), extracts `<video>` frames and mixes the audio into a plan directory
-   (layout `plan-dir-v1`).
+1. `planV2WithPublisher` from `@hyperframes/producer/distributed` (0.9) compiles the project
+   (fonts, sub-compositions, inlined scripts), probes its videos and mixes the audio into a local
+   Plan v2 store, as one chunk. `materializePlanV2Target` lays out that chunk (the compiled site, the
+   frames the plan extracted, the sources of deferred videos) and the assembler (the audio).
 2. `createFileServer` serves the compiled site with the verified HyperFrames runtime, the virtual-time
-   shim and the page-side compositing flag.
+   shim (ported from 0.9: seeded `Math.random`, timers on film time once rendering starts) and the
+   page-side compositing flag.
 3. FrameVelo drives `window.__hf.seek` and captures as above.
-4. Frames inside a video's window are driven from Node: the official `createVideoFrameInjector` swaps
+4. Since 0.9 the plan extracts only short video windows; it leaves long constant-rate ones for the
+   renderer, which extracts just the frames it shows. Once the frame range is known, FrameVelo looks up
+   which frame of each such video every sample time (sub-frames included) shows, with the official
+   lookup table, and extracts those runs with the engine's `extractVideoFramesRange`, as the official
+   chunk renderer does. A partial render (`--start`, `--frames`) extracts only its part.
+5. Frames inside a video's window are driven from Node: the official `createVideoFrameInjector` swaps
    each `<video>` for its extracted frame (served same-origin), the canvas runs one paint event so the
    swapped image reaches the paint record, then the frame is painted. Other frames loop in the page.
-5. The plan's AAC mix is stream-copied into the MP4. The plan is asked for it with
-   `chunksCarryAudio`, the mode in which the mix goes straight into the output: cut to the frame count
-   and held to the official −1 dBTP true peak (a static attenuation, re-measured, as
-   `hyperframes render` does when it assembles). Without it the plan leaves both to an assemble stage
-   FrameVelo does not run, and a hot mix came out several dB louder and clipping.
+6. The plan's AAC mix is stream-copied into the MP4. Plan v2 prepares it for delivery: cut to the
+   frame count and held to the official −1 dBTP true peak (a static attenuation, re-measured). Under
+   0.8 this took `chunksCarryAudio`; without it a hot mix came out several dB louder and clipping.
 
 Chrome starts while the project compiles.
 

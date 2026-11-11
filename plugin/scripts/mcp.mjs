@@ -46,7 +46,7 @@ if (globalModules && existsSync(cliIn(globalModules))) {
     const [dir, lock, spec] = process.argv.slice(1);
     const windows = process.platform === "win32";
     const result = spawnSync(windows ? "npm.cmd" : "npm",
-      ["install", "--no-fund", "--no-audit", "--loglevel=error", spec, "@hyperframes/producer@0.8.186", "@hyperframes/engine@0.8.186"],
+      ["install", "--no-fund", "--no-audit", "--loglevel=error", spec, "@hyperframes/producer@0.9.33", "@hyperframes/engine@0.9.33"],
       { cwd: dir, stdio: "inherit", shell: windows, windowsHide: true, env: { ...process.env, PUPPETEER_SKIP_DOWNLOAD: "true" } });
     rmSync(lock, { recursive: true, force: true });
     process.exit(result.status ?? 1);`;

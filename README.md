@@ -40,7 +40,7 @@ Measured on an Apple M3 Pro (11 cores, 18 GB), macOS 27.0.1, chrome-headless-she
 ## Quick start
 
 ```bash
-npm install -g github:gnipbao/framevelo @hyperframes/producer@0.8 @hyperframes/engine@0.8
+npm install -g github:gnipbao/framevelo @hyperframes/producer@0.9 @hyperframes/engine@0.9
 ```
 
 ```bash

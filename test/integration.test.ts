@@ -105,6 +105,23 @@ describe("render (integration)", { skip: !enabled && "set FRAMEVELO_INTEGRATION=
     assert.ok(psnr > 40, `split and single-page renders match (PSNR ${psnr} dB)`);
   });
 
+  test("HyperFrames: a video sampled into WebGL shows its injected frames", async () => {
+    // The injector swaps the <video> for an extracted frame after the seek, then asks the runtime to
+    // re-run the page's GPU drawing (window.__hfReseekGpu); without that the canvas stays black.
+    const project = path.join(fixtures, "hf-webgl-video");
+    const clip = path.join(project, "clip.mp4");
+    if (!existsSync(clip)) {
+      execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", "30", clip]);
+    }
+    const output = path.join(dir, "webgl-video.mp4");
+    const result = await render({ ...logging, input: project, output });
+    assert.equal(result.pipeline, "hyperframes");
+    assert.equal((await probeVideo(output)).packets, 60);
+    const { stderr } = spawnSync("ffmpeg", ["-hide_banner", "-i", output, "-i", clip, "-lavfi", "[0:v][1:v]psnr", "-f", "null", "-"], { encoding: "utf8" });
+    const psnr = Number(/average:([\d.]+)/.exec(stderr)?.[1]);
+    assert.ok(psnr > 30, `the canvas shows the video, not black (PSNR ${psnr} dB against the source)`);
+  });
+
   test("screenshot frames stay on one page", async () => {
     // Chrome serializes screenshot work: a second page would cost memory and gain little.
     const result = await render({ ...logging, input: path.join(examples, "dom-cards"), output: path.join(dir, "shots.mp4"), capture: "screenshot", fps: 120, frames: 400, width: 320, height: 180, workers: 2 });

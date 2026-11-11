@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### HyperFrames 0.9
+
+- HyperFrames projects compile with `@hyperframes/producer` and `@hyperframes/engine` 0.9.33 or a
+  later 0.9 release; 0.8 is no longer supported (`npm install -g @hyperframes/producer@0.9
+  @hyperframes/engine@0.9`). 0.9 removed the `plan()` FrameVelo used: projects now go through Plan
+  v2 (`planV2WithPublisher`), materialized as one chunk for the site and as the assembler for the
+  audio, which 0.9 cuts to the frame count and holds to −1 dBTP on its own.
+- 0.9 leaves long video windows unextracted at plan time. FrameVelo extracts the frames each video
+  shows at the times it samples, with the official lookup and `extractVideoFramesRange`, so a
+  partial render extracts only its part. Runs less than a second apart are extracted as one: a
+  sped-up video shows every few frames, and one FFmpeg seek per shown frame took 6.3 s for a 4 s
+  clip (0.9 s merged).
+- The virtual-time shim follows 0.9: `Math.random` and `crypto.getRandomValues` are seeded from
+  the frame time, and timers set once rendering starts fire on film time, so random and
+  timer-driven compositions match `hyperframes render`.
+- An installed 0.8 fails with a message that names the version FrameVelo needs.
+
 ### Chrome flags
 
 - Extra Chrome flags, for machines where Chrome's defaults leave the GPU or the hardware encoder
