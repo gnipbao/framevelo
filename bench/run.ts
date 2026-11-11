@@ -24,7 +24,7 @@ import { findChrome } from "../src/chrome.ts";
 import { prepareRemotionFixture } from "../scripts/remotion-fixture.ts";
 import { framePsnr, measure, medianRun, round, streams, type Measured } from "./measure.ts";
 
-const HYPERFRAMES = "0.8.186";
+const HYPERFRAMES = "0.9.33";
 const REMOTION = "4.0.539";
 /** Official regression fixtures (packages/producer/tests) that render on macOS without extra services. */
 export const FIXTURES = [

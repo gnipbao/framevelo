@@ -293,6 +293,7 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
         fps,
         preHeadScripts: [VIRTUAL_TIME_SHIM, PAGE_SIDE_COMPOSITING_FLAG],
         onLog: log,
+        ...(signal ? { signal } : {}),
       });
       if (site.videos && site.planFps !== fps) {
         warnings.push(`video frames were extracted at ${site.planFps} fps for a ${fps} fps render; video motion is approximate`);
@@ -388,7 +389,22 @@ export async function render(options: RenderOptions): Promise<RenderResult> {
     if (site?.videos) {
       const api = await loadHyperFrames();
       const videos = site.videos;
-      const lookup = api.engine.createFrameLookupTable(videos.videos, videos.extracted, site.planFps);
+      // Long video windows are extracted now, for exactly the times this render samples.
+      const e0 = performance.now();
+      const firstFrame = Math.round(start * fps);
+      const sampleTimes = function* () {
+        for (let frame = firstFrame; frame < firstFrame + frames; frame++) {
+          for (const offset of offsets) yield Math.max(0, frame / fps + offset);
+        }
+      };
+      const extracted = await site.videoFrames(sampleTimes(), signal);
+      // Part of compiling the project, as it was when the plan extracted every frame.
+      compileMs += performance.now() - e0;
+      if (videos.deferred.length) {
+        const count = extracted.reduce((sum, video) => sum + (video.deferredRange ? video.framePaths.size : 0), 0);
+        log(`hyperframes: extracted ${count} video frames in ${((performance.now() - e0) / 1000).toFixed(1)} s`);
+      }
+      const lookup = api.engine.createFrameLookupTable(videos.videos, extracted, site.planFps);
       const frameUrl = site.frameUrl;
       // Frames load over same-origin HTTP rather than as base64 data URIs through the protocol.
       const injector = () => api.producer.createVideoFrameInjector(lookup, { frameSrcResolver: (framePath) => frameUrl(framePath) });

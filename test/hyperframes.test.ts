@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { isHyperFramesHtml, planFps, readPlanVideos, withConsoleRoutedTo } from "../src/hyperframes.ts";
+import { contiguousRuns, isHyperFramesHtml, planFps, readPlanVideos, withConsoleRoutedTo } from "../src/hyperframes.ts";
 
 test("isHyperFramesHtml looks for a composition id", () => {
   assert.equal(isHyperFramesHtml(`<div id="root" data-composition-id="main" data-width="1920">`), true);
@@ -19,7 +19,7 @@ test("planFps snaps to the rates the planner accepts", () => {
   assert.equal(planFps(12), 24);
 });
 
-test("readPlanVideos rebuilds frame paths in presentation order", async () => {
+test("readPlanVideos keys extracted frames by their file numbers and keeps deferred windows apart", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "framevelo-plan-test-"));
   try {
     assert.equal(readPlanVideos(dir), null, "no meta means no videos");
@@ -28,25 +28,48 @@ test("readPlanVideos rebuilds frame paths in presentation order", async () => {
     for (const name of ["frame_00010.jpg", "frame_00002.jpg", "frame_00001.jpg", "notes.txt"]) {
       await writeFile(path.join(dir, "video-frames", "clip", name), "");
     }
-    const video = { id: "clip", src: "a.mp4", start: 1, end: 4 };
+    const clip = { id: "clip", src: "a.mp4", start: 1, end: 4 };
+    const long = { id: "long", src: "b.mp4", start: 0, end: 15 };
+    const deferredRange = { sourcePath: "compiled/b.mp4", startTime: 0, durationSeconds: 15, format: "jpg" };
     await writeFile(
       path.join(dir, "meta", "videos.json"),
       JSON.stringify({
-        videos: [video],
-        extracted: [{ videoId: "clip", srcPath: "compiled/a.mp4", framePattern: "frame_%05d.jpg", fps: 30, totalFrames: 3, metadata: {} }],
+        videos: [clip, long],
+        extracted: [
+          { videoId: "clip", srcPath: "compiled/a.mp4", framePattern: "frame_%05d.jpg", fps: 30, totalFrames: 10, metadata: {} },
+          { videoId: "long", srcPath: "compiled/b.mp4", framePattern: "frame_%05d.jpg", fps: 30, totalFrames: 450, metadata: {}, deferredRange },
+        ],
       }),
     );
     const result = readPlanVideos(dir)!;
-    assert.deepEqual(result.videos, [video]);
-    const extracted = result.extracted[0] as { framePaths: Map<number, string>; ownedByLookup: boolean };
-    assert.deepEqual([...extracted.framePaths.values()].map((p) => path.basename(p)), ["frame_00001.jpg", "frame_00002.jpg", "frame_00010.jpg"]);
-    assert.equal(extracted.ownedByLookup, false);
+    assert.deepEqual(result.videos, [clip, long]);
+    const [extracted] = result.extracted;
+    assert.deepEqual([...extracted!.framePaths.keys()], [0, 1, 9], "frame_00010 is frame index 9");
+    assert.deepEqual([...extracted!.framePaths.values()].map((p) => path.basename(p)), ["frame_00001.jpg", "frame_00002.jpg", "frame_00010.jpg"]);
+    assert.equal(extracted!.ownedByLookup, false);
+    assert.equal(result.deferred.length, 1);
+    assert.deepEqual(result.deferred[0]!.deferredRange, deferredRange);
+    assert.equal(result.deferred[0]!.framePaths.size, 0, "deferred frames are extracted by the render");
+    assert.equal(result.deferred[0]!.outputDir, path.join(dir, "video-frames", "long"));
 
     await writeFile(path.join(dir, "meta", "videos.json"), JSON.stringify({ videos: [], extracted: [] }));
     assert.equal(readPlanVideos(dir), null, "a plan without extracted videos needs no injector");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("contiguousRuns groups consecutive frame indexes and bridges short gaps", () => {
+  assert.deepEqual(contiguousRuns([]), []);
+  assert.deepEqual(contiguousRuns([0, 1, 2, 5, 7, 8]), [
+    { firstFrame: 0, frames: 3 },
+    { firstFrame: 5, frames: 1 },
+    { firstFrame: 7, frames: 2 },
+  ]);
+  assert.deepEqual(contiguousRuns([0, 4, 8, 40, 41], 30), [
+    { firstFrame: 0, frames: 9 },
+    { firstFrame: 40, frames: 2 },
+  ], "gaps up to maxGap frames join one run");
 });
 
 test("withConsoleRoutedTo forwards warnings, drops info, and restores the console", async () => {

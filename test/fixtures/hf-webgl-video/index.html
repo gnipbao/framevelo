@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      body { margin: 0; background: #000; }
+      #gl { position: absolute; top: 0; left: 0; width: 320px; height: 180px; }
+      /* Sampled into WebGL only; parked out of sight. */
+      #vid { position: absolute; top: 0; left: 0; width: 4px; height: 4px; opacity: 0; z-index: -1; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="webgl-video" data-width="320" data-height="180" data-start="0" data-duration="2">
+      <video id="vid" class="clip" data-start="0" data-duration="2" data-track-index="0" src="clip.mp4" muted playsinline></video>
+      <canvas id="gl" width="320" height="180"></canvas>
+      <script>
+        // Draws the video into WebGL on every seek, as a WebGL composition that samples a video does.
+        (function () {
+          var gl = document.getElementById("gl").getContext("webgl2", { preserveDrawingBuffer: true });
+          var vs = "#version 300 es\nin vec2 p; out vec2 uv;\nvoid main(){ uv = vec2(p.x*0.5+0.5, 0.5-p.y*0.5); gl_Position = vec4(p,0.0,1.0); }";
+          var fs = "#version 300 es\nprecision highp float; in vec2 uv; uniform sampler2D tex; out vec4 c;\nvoid main(){ c = texture(tex, uv); }";
+          function shader(type, src) { var s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; }
+          var prog = gl.createProgram();
+          gl.attachShader(prog, shader(gl.VERTEX_SHADER, vs));
+          gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, fs));
+          gl.linkProgram(prog);
+          gl.useProgram(prog);
+          gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+          gl.enableVertexAttribArray(0);
+          gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+          var tex = gl.createTexture();
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+          var video = document.getElementById("vid");
+          function render() {
+            if (video.readyState >= 2) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+            gl.clearColor(0, 0, 0, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+          }
+          window.addEventListener("hf-seek", render);
+          window.__timelines = window.__timelines || {};
+          window.__timelines["webgl-video"] = gsap.timeline({ paused: true });
+        })();
+      </script>
+    </div>
+  </body>
+</html>

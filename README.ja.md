@@ -40,7 +40,7 @@ seek(t) ─► drawElementImage（DOM）/ canvas ─► VideoFrame ─► WebCod
 ## クイックスタート
 
 ```bash
-npm install -g github:gnipbao/framevelo @hyperframes/producer@0.8 @hyperframes/engine@0.8
+npm install -g github:gnipbao/framevelo @hyperframes/producer@0.9 @hyperframes/engine@0.9
 ```
 
 ```bash

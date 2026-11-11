@@ -1,7 +1,7 @@
 // Render HyperFrames projects with the official CLI and with FrameVelo on this machine, then report
 // per-frame PSNR between the two, audio presence, and wall time / CPU / peak memory of each.
 //
-//   node bench/parity.ts <project-dir>... [--resolution 4k] [--out dir] [--hyperframes 0.8.186] [--json]
+//   node bench/parity.ts <project-dir>... [--resolution 4k] [--out dir] [--hyperframes 0.9.33] [--json]
 //
 // A project dir is a HyperFrames project (index.html) or a regression fixture (src/index.html).
 import { existsSync, mkdirSync } from "node:fs";
@@ -14,7 +14,7 @@ const { values, positionals } = parseArgs({
   options: {
     resolution: { type: "string" },
     out: { type: "string", default: "out/parity" },
-    hyperframes: { type: "string", default: "0.8.186" },
+    hyperframes: { type: "string", default: "0.9.33" },
     json: { type: "boolean" },
   },
 });
